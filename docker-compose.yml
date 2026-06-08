@@ -1,0 +1,16 @@
+services:
+  web:
+    image: nginx:1.27-alpine
+    container_name: magic_music_web
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${APP_PORT:-8095}:80"
+    volumes:
+      - ./app:/usr/share/nginx/html:ro
+    networks:
+      - magic_music_net
+
+networks:
+  magic_music_net:
+    name: magic_music_net
+    driver: bridge
