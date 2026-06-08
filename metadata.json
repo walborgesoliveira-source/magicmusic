@@ -1,0 +1,6 @@
+{
+  "name": "Magic Music",
+  "description": "Crie músicas personalizadas e emocionantes com IA — com letras bonitas, vocais reais e produção completa. Perfeito para aniversários, declarações de amor e momentos especiais.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
