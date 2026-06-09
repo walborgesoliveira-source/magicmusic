@@ -1,0 +1,16 @@
+.git
+.env
+node_modules
+npm-debug.log
+.gradle
+.idea
+.kotlin
+build
+dist
+captures
+.externalNativeBuild
+.cxx
+local.properties
+*.iml
+*.zip
+*.tar.gz

@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Magic Music - Compositor de Músicas com IA</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Icons -->
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <!-- Style -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- App Header -->
+        <header class="app-header">
+            <div class="logo-area">
+                <span class="logo-light">Magic</span><span class="logo-pink">Music</span>
+                <span class="logo-badge">IA COMPOSITOR</span>
+                <button class="btn-admin-trigger" onclick="toggleAdminMode()" style="background: none; border: none; color: #a1a1aa; cursor: pointer; display: flex; align-items: center; padding: 0 4px; margin-left: 6px;" title="Painel Admin"><i class="material-icons" style="font-size: 16px;">admin_panel_settings</i></button>
+            </div>
+            <div class="credits-badge" id="header-credits">
+                <i class="material-icons text-amber">bolt</i>
+                <span id="credits-count">3</span> créditos
+            </div>
+        </header>
+
+        <!-- Main Workspace Contents -->
+        <main class="app-content">
+            <!-- TAB 1: CREATE -->
+            <section id="tab-create" class="tab-pane active">
+                <div class="wizard-header">
+                    <h2>Criar Música Personalizada</h2>
+                    <p>Insira os dados abaixo para que nossa inteligência artificial gere uma letra única e vocais reales adaptados ao seu gosto.</p>
+                </div>
+
+                <!-- Stepper Progress -->
+                <div class="stepper">
+                    <div class="step active" data-step="1">1</div>
+                    <div class="step-line"></div>
+                    <div class="step" data-step="2">2</div>
+                    <div class="step-line"></div>
+                    <div class="step" data-step="3">3</div>
+                    <div class="step-line"></div>
+                    <div class="step" data-step="4">4</div>
+                </div>
+
+                <!-- Wizard Panel Step 1: Occasions -->
+                <div class="wizard-panel active" id="panel-step-1">
+                    <h3>Escolha a ocasião especial</h3>
+                    <div class="options-list grid-columns">
+                        <div class="option-card selected" data-occasion="Aniversário">
+                            <div class="option-icon bg-pink"><i class="material-icons">cake</i></div>
+                            <div class="option-info">
+                                <h4>Aniversário</h4>
+                                <p>Comemorar um ano de vitórias</p>
+                            </div>
+                        </div>
+                        <div class="option-card" data-occasion="Declaração de amor">
+                            <div class="option-icon bg-pink"><i class="material-icons">favorite</i></div>
+                            <div class="option-info">
+                                <h4>Declaração de amor</h4>
+                                <p>Derreter o coração de quem ama</p>
+                            </div>
+                        </div>
+                        <div class="option-card" data-occasion="Casamento">
+                            <div class="option-icon bg-pink"><i class="material-icons">favorite_border</i></div>
+                            <div class="option-info">
+                                <h4>Casamento</h4>
+                                <p>Para o altar ou noivado dos sonhos</p>
+                            </div>
+                        </div>
+                        <div class="option-card" data-occasion="Pegadinha">
+                            <div class="option-icon bg-pink"><i class="material-icons">mood_bad</i></div>
+                            <div class="option-info">
+                                <h4>Pegadinha</h4>
+                                <p>Fazer graça com piadas internas</p>
+                            </div>
+                        </div>
+                        <div class="option-card" data-occasion="Motivação">
+                            <div class="option-icon bg-pink"><i class="material-icons">bolt</i></div>
+                            <div class="option-info">
+                                <h4>Motivação</h4>
+                                <p>Dar aquela força e inspiração</p>
+                            </div>
+                        </div>
+                        <div class="option-card" data-occasion="Festa">
+                            <div class="option-icon bg-pink"><i class="material-icons">music_note</i></div>
+                            <div class="option-info">
+                                <h4>Festa</h4>
+                                <p>Esquentar a pista de dança</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="wizard-actions">
+                        <button class="btn btn-primary btn-next" onclick="goToStep(2)">Continuar</button>
+                    </div>
+                </div>
+
+                <!-- Wizard Panel Step 2: Styles -->
+                <div class="wizard-panel" id="panel-step-2">
+                    <h3>Escolha o estilo musical</h3>
+                    <div class="options-list grid-columns">
+                        <div class="option-card selected" data-style="Pop BR">
+                            <div class="option-icon text-indigo"><i class="material-icons">music_video</i></div>
+                            <div class="option-info">
+                                <h4>Pop BR</h4>
+                                <p>Vitorioso, moderno e radiofônico</p>
+                            </div>
+                        </div>
+                        <div class="option-card" data-style="Acústico / MPB">
+                            <div class="option-icon text-indigo"><i class="material-icons">music_video</i></div>
+                            <div class="option-info">
+                                <h4>Acústico / MPB</h4>
+                                <p>Voz suave e violão poético</p>
+                            </div>
+                        </div>
+                        <div class="option-card" data-style="Trap / Rap">
+                            <div class="option-icon text-indigo"><i class="material-icons">music_video</i></div>
+                            <div class="option-info">
+                                <h4>Trap / Rap</h4>
+                                <p>Batida urbana, graves pesados e ritmo rápido</p>
+                            </div>
+                        </div>
+                        <div class="option-card" data-style="Rock">
+                            <div class="option-icon text-indigo"><i class="material-icons">music_video</i></div>
+                            <div class="option-info">
+                                <h4>Rock</h4>
+                                <p>Guitarras enérgicas e batidas pulsantes</p>
+                            </div>
+                        </div>
+                        <div class="option-card" data-style="Eletrônica">
+                            <div class="option-icon text-indigo"><i class="material-icons">music_video</i></div>
+                            <div class="option-info">
+                                <h4>Eletrônica</h4>
+                                <p>Sintetizadores contagiantes e dançantes</p>
+                            </div>
+                        </div>
+                        <div class="option-card" data-style="Sertanejo">
+                            <div class="option-icon text-indigo"><i class="material-icons">music_video</i></div>
+                            <div class="option-info">
+                                <h4>Sertanejo</h4>
+                                <p>Modão sertanejo animado de bota e chapéu</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="wizard-actions row-flex">
+                        <button class="btn btn-secondary" onclick="goToStep(1)">Voltar</button>
+                        <button class="btn btn-primary" onclick="goToStep(3)">Continuar</button>
+                    </div>
+                </div>
+
+                <!-- Wizard Panel Step 3: Details -->
+                <div class="wizard-panel" id="panel-step-3">
+                    <h3>Detalhes da personalização</h3>
+                    <div class="form-group">
+                        <label for="recipient-name">Para quem é a música? (Nome ou apelido)</label>
+                        <input type="text" id="recipient-name" placeholder="Ex: Júlia, Mariana, André" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="key-stories">Histórias engraçadas, piadas internas ou qualidades</label>
+                        <textarea id="key-stories" placeholder="Ex: Sempre chega atrasado no suporte com pressculpa do trânsito, adora gatos, faz 30 anos agora..." rows="3"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Vibe / Sentimento</label>
+                        <div class="chips-group" id="vibe-chips">
+                            <div class="chip selected" data-vibe="Alegre">Alegre</div>
+                            <div class="chip" data-vibe="Romântico">Romântico</div>
+                            <div class="chip" data-vibe="Emocionante">Emocionante</div>
+                            <div class="chip selected" data-vibe="Divertido">Divertido</div>
+                            <div class="chip" data-vibe="Épico">Épico</div>
+                            <div class="chip" data-vibe="Nostálgico">Nostálgico</div>
+                        </div>
+                    </div>
+                    <div class="wizard-actions row-flex">
+                        <button class="btn btn-secondary" onclick="goToStep(2)">Voltar</button>
+                        <button class="btn btn-primary" id="btn-draft-lyrics" onclick="draftLyricsWithAI()">Criar Letras Rítmicas ✨</button>
+                    </div>
+                </div>
+
+                <!-- Wizard Panel Step 4: Preview/Edit -->
+                <div class="wizard-panel" id="panel-step-4">
+                    <h3>Revise e Ajuste a Letra</h3>
+                    <p class="panel-subtitle">Sinta-se livre para ajustar e editar as rimas como desejar antes de mixar!</p>
+                    <div class="form-group">
+                        <label for="draft-title">Título Sugerido</label>
+                        <input type="text" id="draft-title" placeholder="Título da canção">
+                    </div>
+                    <div class="form-group">
+                        <label for="draft-lyrics">Edição da Letra Completa</label>
+                        <textarea id="draft-lyrics" rows="12"></textarea>
+                    </div>
+                    <div class="wizard-actions row-flex">
+                        <button class="btn btn-secondary" onclick="resetWizard()">Refazer</button>
+                        <button class="btn btn-success" onclick="finalizeProduction()">Gerar Áudio & Vocais Reais 🎤</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 2: LIBRARY -->
+            <section id="tab-library" class="tab-pane">
+                <div class="library-header">
+                    <h2>Dedicatórias Produzidas</h2>
+                    <p>Sua coleção particular de canções personalizadas no Magic Music.</p>
+                </div>
+                <!-- Filter bar -->
+                <div class="library-filters scrollable-row">
+                    <span class="filter-chip active" data-filter="Todas">Todas</span>
+                    <span class="filter-chip" data-filter="Aniversário">Aniversário</span>
+                    <span class="filter-chip" data-filter="Declaração de amor">Declaração</span>
+                    <span class="filter-chip" data-filter="Pegadinha">Pegadinha</span>
+                    <span class="filter-chip" data-filter="Favoritas">Favoritas</span>
+                </div>
+                <!-- Songs List -->
+                <div class="songs-list" id="library-songs-container">
+                    <!-- Dynamic code output -->
+                </div>
+            </section>
+
+            <!-- TAB 3: PLAYER -->
+            <section id="tab-player" class="tab-pane">
+                <div class="player-header">
+                    <button class="btn-icon" onclick="switchTab('library')"><i class="material-icons">arrow_back</i></button>
+                    <div class="player-title-box">
+                        <span class="text-pink subtitle-small" id="player-song-genre">POP BR</span>
+                        <h3>Magic Music Studio Player</h3>
+                    </div>
+                    <button class="btn-icon text-amber" onclick="openQuizGame()"><i class="material-icons">school</i></button>
+                </div>
+
+                <!-- Player Cover and EQ Card -->
+                <div class="player-hero-card">
+                    <div class="vinyl-container">
+                        <div class="vinyl-grooves" id="vinyl-disc">
+                            <div class="vinyl-center" id="vinyl-center-color">
+                                <i class="material-icons text-white">music_note</i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="player-hero-details">
+                        <h4 id="player-song-title">Selecione uma canção</h4>
+                        <p class="text-gray" id="player-song-artist">Magic Music AI</p>
+                        <!-- Visualizer Canvas -->
+                        <div class="visualizer-container">
+                            <canvas id="visualizer-canvas" height="40"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Lyrics Scrolling Panel -->
+                <div class="lyrics-view-container">
+                    <div class="lyrics-scroll-box" id="lyrics-scroll-box">
+                        <!-- Dynamic lyrics rows -->
+                        <div class="no-lyrics">Sem música em reprodução</div>
+                    </div>
+                </div>
+
+                <!-- Audio Tracker Timeline -->
+                <div class="player-timeline">
+                    <div class="timeline-row">
+                        <span id="player-time-elapsed">00:00</span>
+                        <span class="text-amber bold" id="player-song-style">GÊNERO: POP</span>
+                        <span id="player-time-total">02:00</span>
+                    </div>
+                    <div class="slider-container">
+                        <input type="range" id="player-progress-bar" min="0" max="100" value="0">
+                        <div class="slider-fill" id="player-progress-fill"></div>
+                    </div>
+                </div>
+
+                <!-- Control Buttons -->
+                <div class="player-controls">
+                    <button class="control-btn border-dark" id="btn-share" onclick="shareSong()"><i class="material-icons">share</i></button>
+                    <button class="control-btn" id="btn-prev" onclick="seekLineRelative(-1)"><i class="material-icons">skip_previous</i></button>
+                    <button class="control-btn play-btn" id="btn-play" onclick="togglePlayPause()"><i class="material-icons" id="play-icon">play_arrow</i></button>
+                    <button class="control-btn" id="btn-next" onclick="seekLineRelative(1)"><i class="material-icons">skip_next</i></button>
+                    <button class="control-btn border-dark" id="btn-download" onclick="downloadSong()"><i class="material-icons">download</i></button>
+                </div>
+            </section>
+
+            <!-- TAB 4: SHOP -->
+            <section id="tab-shop" class="tab-pane">
+                <div class="shop-header">
+                    <h2>Loja de Crédito Magic Music</h2>
+                    <p>Adquira tokens de geração rápida para bolar novas e emocionantes faixas!</p>
+                </div>
+
+                <!-- Balance card -->
+                <div class="balance-card">
+                    <span class="balance-subtitle">SEU SALDO ATUAL</span>
+                    <div class="balance-count-row">
+                        <i class="material-icons text-amber large-icon">bolt</i>
+                        <span id="shop-credits-count">3</span>
+                        <span class="balance-lbl">músicas</span>
+                    </div>
+                </div>
+
+                <h3 class="shop-section-title">Nossos Combos de Créditos</h3>
+                <p class="text-gray subtitle-small">Valores de cobrança única. Sem assinaturas ocultas.</p>
+
+                <!-- Combo packs -->
+                <div class="shop-packs">
+                    <!-- Pack 1 -->
+                    <div class="shop-pack-item border-pink">
+                        <div class="pack-details">
+                            <h4 class="text-pink">1 Canção Personalizada</h4>
+                            <p>Perfeito para experimentar ou presentear alguém especial hoje.</p>
+                        </div>
+                        <div class="pack-purchase-row">
+                            <span class="pack-price">R$ 19,90</span>
+                            <button class="btn btn-pink" onclick="buyCredits(1)">Adquirir</button>
+                        </div>
+                    </div>
+
+                    <!-- Pack 2 -->
+                    <div class="shop-pack-item border-amber popular">
+                        <div class="popular-tag">MAIS PROCURADO ⭐</div>
+                        <div class="pack-details">
+                            <h4 class="text-amber">Combo 3 Canções (Economize!)</h4>
+                            <p>Mais vendido! R$ 11,63 por canção. Perfeito para várias datas especiais.</p>
+                        </div>
+                        <div class="pack-purchase-row">
+                            <span class="pack-price">R$ 34,90</span>
+                            <button class="btn btn-amber" onclick="buyCredits(3)">Comprar Popular</button>
+                        </div>
+                    </div>
+
+                    <!-- Pack 3 -->
+                    <div class="shop-pack-item border-indigo">
+                        <div class="pack-details">
+                            <h4 class="text-indigo">Super Pack 5 Canções</h4>
+                            <p>Melhor Tarifa! Apenas R$ 9,98 por canção. Total liberdade criativa.</p>
+                        </div>
+                        <div class="pack-purchase-row">
+                            <span class="pack-price">R$ 49,90</span>
+                            <button class="btn btn-indigo" onclick="buyCredits(5)">Comprar Master Pack</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 5: ADMIN PANEL -->
+            <section id="tab-admin" class="tab-pane">
+                <div class="shop-header" style="border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 15px; margin-bottom: 20px;">
+                    <h2>Painel de Produção (Admin)</h2>
+                    <p class="text-gray" style="font-size: 14px;">Gerencie os pedidos pendentes de áudio gerados pelos clientes. Copie as letras/prompts para o Suno e cole a URL do MP3 pronto.</p>
+                </div>
+                <div class="admin-container">
+                    <div id="admin-pending-list" class="admin-pending-list">
+                        <!-- Populated dynamically -->
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Floating Mini Player -->
+        <div class="floating-mini-player" id="mini-player" style="display: none;" onclick="switchTab('player')">
+            <div class="mini-player-left">
+                <div class="mini-cover" id="mini-player-cover"></div>
+                <div class="mini-text">
+                    <h5 id="mini-title">Música</h5>
+                    <p id="mini-artist">Artista</p>
+                </div>
+            </div>
+            <button class="mini-play-btn" onclick="event.stopPropagation(); togglePlayPause()"><i class="material-icons" id="mini-play-icon">pause</i></button>
+        </div>
+
+        <!-- App Footer Nav Bar -->
+        <nav class="app-navbar">
+            <div class="nav-item active" data-tab="create" onclick="switchTab('create')">
+                <i class="material-icons">auto_awesome</i>
+                <span>Criar</span>
+            </div>
+            <div class="nav-item" data-tab="library" onclick="switchTab('library')">
+                <i class="material-icons">library_music</i>
+                <span>Músicas</span>
+            </div>
+            <div class="nav-item" data-tab="player" onclick="switchTab('player')">
+                <i class="material-icons">play_circle</i>
+                <span>Player</span>
+            </div>
+            <div class="nav-item" data-tab="shop" onclick="switchTab('shop')">
+                <i class="material-icons">shopping_bag</i>
+                <span id="nav-credits-text">Crédito: 3</span>
+            </div>
+        </nav>
+    </div>
+
+    <!-- MODAL 1: SIMULATED PIX CHECKOUT -->
+    <div class="modal-overlay" id="pix-modal">
+        <div class="modal-card">
+            <h3>Processando Pagamento</h3>
+            <div class="modal-content text-center">
+                <i class="material-icons text-white qr-code-placeholder">qr_code_2</i>
+                <p class="text-gray subtitle-small">Pague via Pix copia e cola:</p>
+                <div class="pix-copy-box" id="pix-code-clicker">
+                    <span class="pix-code-text" id="pix-code-text">00020101021226830014br.gov.bcb...</span>
+                    <i class="material-icons text-amber">content_copy</i>
+                </div>
+                <h2 class="text-white mt-10" id="pix-price">R$ 0,00</h2>
+                <p class="text-gray subtitle-small mt-10">O crédito será adicionado automaticamente após confirmação do simulador.</p>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeModal('pix-modal')">Cancelar</button>
+                <button class="btn btn-success" id="btn-confirm-payment">Confirmar Simulação 💰</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL 2: INTERACTIVE QUIZ GAME CHALLENGE -->
+    <div class="modal-overlay" id="quiz-modal">
+        <div class="modal-card">
+            <div class="modal-header-row">
+                <h3>Desafio: Complete a Letra</h3>
+                <button class="btn-icon text-gray" onclick="closeModal('quiz-modal')"><i class="material-icons">close</i></button>
+            </div>
+            <div class="modal-content">
+                <p class="quiz-line-prompt" id="quiz-blank-line">Carregando o desafio de letras...</p>
+                <div class="quiz-options-group" id="quiz-options-container">
+                    <!-- Options buttons -->
+                </div>
+                <div class="quiz-feedback-box" id="quiz-feedback-box" style="display: none;">
+                    <!-- Correct/Incorrect message -->
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-pink" id="btn-next-quiz" style="display: none;" onclick="nextQuizQuestion()">Próximo</button>
+                <button class="btn btn-secondary" onclick="closeModal('quiz-modal')">Voltar ao Player</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL 3: PRODUCTION IN PROGRESS OVERLAY -->
+    <div class="modal-overlay" id="production-modal">
+        <div class="modal-card text-center no-border">
+            <div class="spinner-container">
+                <div class="spinner"></div>
+            </div>
+            <h4 class="text-white uppercase tracking-wider mt-15">Estúdio Magic Music em Ação</h4>
+            <p class="text-amber bold mt-10" id="production-status-text">Convocando musas poéticas da IA...</p>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

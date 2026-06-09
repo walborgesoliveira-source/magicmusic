@@ -1,0 +1,22 @@
+{
+  "songs": [
+    {
+      "id": 99,
+      "title": "Música de Teste",
+      "artist": "Magic Music AI & Teste",
+      "language": "Aniversário",
+      "category": "Pop",
+      "coverColorHex": "0xFFF43F5E",
+      "originalLyrics": "[Verso 1]\nEsta e apenas uma musica de teste\nFeita para testar a API do Suno\n\n[Chorus]\nO teste deu certo, o teste funcionou\nNosso aplicativo esta show!",
+      "translatedLyrics": "Sincronizada via TTS. Gênero: Pop",
+      "romanization": "Alegre",
+      "durationSeconds": 120,
+      "sunoPrompt": "pop, male vocals",
+      "audioUrl": "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
+      "status": "ready",
+      "isPurchased": true,
+      "isFavorite": false,
+      "createdAt": "2026-06-08T19:50:00.000Z"
+    }
+  ]
+}
