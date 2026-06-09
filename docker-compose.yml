@@ -15,8 +15,12 @@ services:
       - ./db.json:/app/db.json
     networks:
       - magic_music_net
+      - proxy_net
 
 networks:
   magic_music_net:
     name: magic_music_net
     driver: bridge
+  proxy_net:
+    external: true
+    name: proxy_net
