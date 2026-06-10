@@ -79,9 +79,19 @@ function sendJson(res, statusCode, data) {
         'Content-Type': 'application/json; charset=utf-8',
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type'
+        'Access-Control-Allow-Headers': 'Content-Type, X-Admin-Password'
     });
     res.end(JSON.stringify(data));
+}
+
+function isAdminAuthorized(req) {
+    const configuredPassword = process.env.ADMIN_PASSWORD;
+    if (!configuredPassword) {
+        console.warn("ADMIN_PASSWORD is not configured; admin route denied.");
+        return false;
+    }
+
+    return req.headers['x-admin-password'] === configuredPassword;
 }
 
 const MIME_TYPES = {
@@ -104,7 +114,7 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(204, {
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type'
+            'Access-Control-Allow-Headers': 'Content-Type, X-Admin-Password'
         });
         res.end();
         return;
@@ -254,6 +264,10 @@ const server = http.createServer(async (req, res) => {
 
     // 3. Admin: Get pending songs
     if (req.method === 'GET' && pathname === '/api/admin/pending') {
+        if (!isAdminAuthorized(req)) {
+            return sendJson(res, 401, { error: "Unauthorized." });
+        }
+
         const db = readDb();
         const pending = db.songs.filter(s => s.status === 'pending_audio');
         return sendJson(res, 200, pending);
@@ -261,6 +275,10 @@ const server = http.createServer(async (req, res) => {
 
     // 4. Admin: Submit generated audio link
     if (req.method === 'POST' && pathname === '/api/admin/submit-audio') {
+        if (!isAdminAuthorized(req)) {
+            return sendJson(res, 401, { error: "Unauthorized." });
+        }
+
         try {
             const { songId, audioUrl } = await getJsonBody(req);
             if (!songId || !audioUrl) {

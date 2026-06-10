@@ -12,6 +12,7 @@ Este projeto roda em container exclusivo, isolado dos demais servicos do servido
 APP_PORT=8095
 PORT=3000
 GEMINI_API_KEY=MY_GEMINI_API_KEY
+ADMIN_PASSWORD=CHANGE_ME_ADMIN_PASSWORD
 ```
 
 2. Suba o ambiente:
@@ -37,6 +38,11 @@ Forward Port: 8095
 ```
 
 Ative SSL, Let's Encrypt e Force HTTPS quando o DNS do dominio estiver apontado para o servidor.
+
+## Painel administrativo
+
+O painel administrativo usa a senha definida em `ADMIN_PASSWORD`.
+No app web, clique no icone de escudo no topo e informe essa senha para acessar a fila de musicas pendentes e liberar URLs de audio.
 
 ## Android / AI Studio
 

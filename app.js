@@ -143,6 +143,7 @@ let wizardDraftSong = null;
 
 let currentQuizQuestion = null;
 let selectedPackAmount = null;
+let adminSessionPassword = "";
 
 // Web Audio API Synthesizer Context
 let audioCtx = null;
@@ -1378,21 +1379,48 @@ function buyCredits(amount) {
 // --- ADMIN MODE & WEB AUDIO PREVIEW INTEGRATION ---
 let purchasingSongId = null;
 
-function toggleAdminMode() {
+async function toggleAdminMode() {
     if (adminModeActive) {
         adminModeActive = false;
+        adminSessionPassword = "";
         document.querySelector('.btn-admin-trigger').style.color = '#a1a1aa';
         switchTab('library');
     } else {
         const password = prompt("Digite a senha do painel administrativo:");
-        if (password === "magicadmin") {
+        if (password === null) return;
+
+        adminSessionPassword = password.trim();
+        if (!adminSessionPassword) {
+            alert("Informe a senha administrativa.");
+            return;
+        }
+
+        try {
+            const response = await fetch("/api/admin/pending", {
+                headers: getAdminHeaders()
+            });
+
+            if (!response.ok) {
+                adminSessionPassword = "";
+                alert("Senha incorreta!");
+                return;
+            }
+
             adminModeActive = true;
             document.querySelector('.btn-admin-trigger').style.color = '#10b981'; // Green indicator
             switchTab('admin');
-        } else if (password !== null) {
-            alert("Senha incorreta!");
+        } catch (e) {
+            console.error(e);
+            adminSessionPassword = "";
+            alert("Não foi possível validar o acesso administrativo.");
         }
     }
+}
+
+function getAdminHeaders() {
+    return {
+        "X-Admin-Password": adminSessionPassword
+    };
 }
 
 async function renderAdminPendingList() {
@@ -1402,7 +1430,17 @@ async function renderAdminPendingList() {
     container.innerHTML = `<div class="loading-text" style="color: #a1a1aa; padding: 20px; text-align: center; font-size: 14px;">Carregando músicas pendentes...</div>`;
     
     try {
-        const response = await fetch("/api/admin/pending");
+        const response = await fetch("/api/admin/pending", {
+            headers: getAdminHeaders()
+        });
+        if (response.status === 401) {
+            adminModeActive = false;
+            adminSessionPassword = "";
+            document.querySelector('.btn-admin-trigger').style.color = '#a1a1aa';
+            switchTab("library");
+            alert("Sessão administrativa expirada ou senha inválida.");
+            return;
+        }
         if (!response.ok) throw new Error("Server error");
         const pendingSongs = await response.json();
         
@@ -1481,7 +1519,8 @@ async function submitAudioUrl(songId) {
         const response = await fetch("/api/admin/submit-audio", {
             method: "POST",
             headers: {
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                ...getAdminHeaders()
             },
             body: JSON.stringify({ songId, audioUrl })
         });
