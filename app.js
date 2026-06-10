@@ -90,9 +90,12 @@ const SongTemplates = {
             category: style,
             coverColorHex: hex,
             originalLyrics: lyrics,
-            translatedLyrics: "Rápida prévia instrumental disponível. Sincronização automática via TTS.",
+            translatedLyrics: "Letra aprovada. Áudio final aguardando produção em estúdio.",
             romanization: vibes.join(", "),
             durationSeconds: 120,
+            sunoPrompt: `${style || "pop"}, portuguese vocals, personalized song`,
+            audioUrl: null,
+            status: "pending_audio",
             isFavorite: false
         };
     }
@@ -718,9 +721,9 @@ async function draftLyricsWithAI() {
         // Local fallback template
         wizardDraftSong = SongTemplates.getFallbackTemplate(selectedOccasion, selectedStyle, name, stories, vibes);
         // Add default fields for local generation
-        wizardDraftSong.sunoPrompt = "acoustic pop, vocal, melodic";
-        wizardDraftSong.status = "ready"; // Local fallback is immediately ready
-        wizardDraftSong.audioUrl = ""; // Synthesized locally
+        wizardDraftSong.sunoPrompt = `${selectedStyle}, portuguese vocals, personalized song`;
+        wizardDraftSong.status = "pending_audio";
+        wizardDraftSong.audioUrl = null;
         wizardDraftSong.isPurchased = false;
         wizardDraftSong.id = songs.length > 0 ? Math.max(...songs.map(s => s.id)) + 1 : 1;
     }
@@ -753,7 +756,7 @@ async function finalizeProduction() {
     updateCreditsUI();
     
     // Check if it's a server-created song (has a backend DB link)
-    const isServerBacked = wizardDraftSong.status === "pending_audio" || wizardDraftSong.createdAt;
+    const isServerBacked = Boolean(wizardDraftSong.createdAt);
 
     if (isServerBacked) {
         document.getElementById("production-status-text").innerText = "Salvando a letra personalizada... ✍️";
@@ -794,31 +797,32 @@ async function finalizeProduction() {
             resetWizard();
         }
     } else {
-        // Offline / Fallback mode
-        const steps = [
-            "Letra aprovada! ✍️",
-            "Afinando as guitarras e teclados virtuais... 🎸",
-            "Aquecendo a banda de sintetizadores... 🎹",
-            "Ajustando vocais digitais em português... 🎤",
-            "Mixagem e masterização concluídas! 🎧"
-        ];
-        
-        let i = 0;
-        function runProductionStep() {
-            if (i < steps.length) {
-                document.getElementById("production-status-text").innerText = steps[i];
-                i++;
-                setTimeout(runProductionStep, 1000);
-            } else {
-                songs.push(wizardDraftSong);
-                AppDB.saveSongs(songs);
-                closeModal("production-modal");
-                alert("Música produzida com sucesso! Redirecionando para o player.");
-                selectSong(wizardDraftSong);
-                resetWizard();
-            }
+        document.getElementById("production-status-text").innerText = "Registrando pedido de produção...";
+        try {
+            const response = await fetch("/api/production-request", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(wizardDraftSong)
+            });
+
+            if (!response.ok) throw new Error(`Server returned status ${response.status}`);
+            const result = await response.json();
+            const savedSong = result.song || wizardDraftSong;
+
+            await syncSongsWithServer();
+            closeModal("production-modal");
+            alert("Letra criada e enviada para produção. O áudio será liberado quando o MP3 final estiver pronto.");
+            selectSong(savedSong);
+            resetWizard();
+        } catch (e) {
+            console.error("Error registering production request:", e);
+            songs.push(wizardDraftSong);
+            AppDB.saveSongs(songs);
+            closeModal("production-modal");
+            alert("Pedido salvo localmente, mas não foi possível enviar aviso de produção agora.");
+            selectSong(wizardDraftSong);
+            resetWizard();
         }
-        runProductionStep();
     }
 }
 
@@ -1005,9 +1009,8 @@ function syncLyricsScroll() {
 function playSong() {
     if (!currentPlayingSong) return;
     
-    // Check pending status
-    if (currentPlayingSong.status === "pending_audio") {
-        alert("Esta música ainda está na fila de produção! Nosso estúdio está gerando o áudio no Suno AI. Por favor, aguarde alguns instantes.");
+    if (!currentPlayingSong.audioUrl || currentPlayingSong.status === "pending_audio") {
+        alert("Esta música ainda está na fila de produção. O player será liberado quando o MP3 final for anexado no painel admin.");
         return;
     }
     
@@ -1080,50 +1083,6 @@ function playSong() {
             }
         }, 500);
         
-    } else {
-        // Mock Web Audio Synthesis Mode
-        initAudioContext();
-        startBackingSynthesizer(currentPlayingSong.category);
-        speakLyricVocals(cleanLines[activeLyricLineIndex], currentPlayingSong.category);
-        
-        clearInterval(playbackInterval);
-        const duration = currentPlayingSong.durationSeconds;
-        const progressSlider = document.getElementById("player-progress-bar");
-        
-        playbackInterval = setInterval(() => {
-            const elapsed = playbackProgress * duration;
-            
-            // 1-minute lock on mock synthesizer
-            if (!currentPlayingSong.isPurchased && elapsed >= 60) {
-                playbackProgress = 60 / duration;
-                pauseSong();
-                openSongPurchaseCheckout(currentPlayingSong);
-                return;
-            }
-            
-            playbackProgress += 0.5 / duration;
-            if (playbackProgress >= 1.0) {
-                playbackProgress = 1.0;
-                pauseSong();
-            }
-            
-            const percent = Math.floor(playbackProgress * 100);
-            progressSlider.value = percent;
-            document.getElementById("player-progress-fill").style.width = `${percent}%`;
-            
-            document.getElementById("player-time-elapsed").innerText = formatTime(Math.floor(playbackProgress * duration));
-            document.getElementById("player-time-total").innerText = formatTime(duration);
-            
-            if (cleanLines.length > 0) {
-                const nextLineIdx = Math.floor(playbackProgress * cleanLines.length);
-                const constrainedIdx = Math.min(nextLineIdx, cleanLines.length - 1);
-                if (constrainedIdx !== activeLyricLineIndex) {
-                    activeLyricLineIndex = constrainedIdx;
-                    speakLyricVocals(cleanLines[activeLyricLineIndex], currentPlayingSong.category);
-                    renderPlayerScreen();
-                }
-            }
-        }, 500);
     }
 }
 
@@ -1221,7 +1180,7 @@ function downloadSong() {
         link.click();
         document.body.removeChild(link);
     } else {
-        alert("Renderizando instrumental sintético completo MP3... O download começará em breve no seu dispositivo!");
+        alert("O MP3 final ainda não está disponível. Anexe a URL do áudio pelo painel admin para liberar download.");
     }
 }
 

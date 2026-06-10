@@ -13,6 +13,9 @@ APP_PORT=8095
 PORT=3000
 GEMINI_API_KEY=MY_GEMINI_API_KEY
 ADMIN_PASSWORD=CHANGE_ME_ADMIN_PASSWORD
+PRODUCTION_ADMIN_URL=http://magicmusic.5.189.152.8.nip.io
+MAGIC_MUSIC_TELEGRAM_BOT_TOKEN=
+MAGIC_MUSIC_TELEGRAM_CHAT_IDS=
 ```
 
 2. Suba o ambiente:
@@ -43,6 +46,12 @@ Ative SSL, Let's Encrypt e Force HTTPS quando o DNS do dominio estiver apontado 
 
 O painel administrativo usa a senha definida em `ADMIN_PASSWORD`.
 No app web, clique no icone de escudo no topo e informe essa senha para acessar a fila de musicas pendentes e liberar URLs de audio.
+
+## Avisos de producao
+
+Quando uma letra e confirmada, o pedido entra na fila do painel admin.
+Opcionalmente, o Magic Music pode enviar aviso por Telegram usando apenas as variaveis exclusivas `MAGIC_MUSIC_TELEGRAM_BOT_TOKEN` e `MAGIC_MUSIC_TELEGRAM_CHAT_IDS`.
+Nao reutilize tokens de outros servicos para evitar falso alarme em operacoes como Massoterapia RJ.
 
 ## Android / AI Studio
 

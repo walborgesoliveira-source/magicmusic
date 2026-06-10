@@ -94,6 +94,64 @@ function isAdminAuthorized(req) {
     return req.headers['x-admin-password'] === configuredPassword;
 }
 
+function getProductionUrl() {
+    return process.env.PRODUCTION_ADMIN_URL || "http://magicmusic.5.189.152.8.nip.io";
+}
+
+function buildProductionMessage(song) {
+    return [
+        "Novo pedido Magic Music para produção",
+        "",
+        `ID: ${song.id}`,
+        `Titulo: ${song.title}`,
+        `Artista: ${song.artist}`,
+        `Ocasião: ${song.language}`,
+        `Estilo: ${song.category}`,
+        `Vibe: ${song.romanization || "-"}`,
+        "",
+        `Painel: ${getProductionUrl()}`,
+        "",
+        "Prompt Suno:",
+        song.sunoPrompt || "-",
+        "",
+        "Letra:",
+        song.originalLyrics || "-"
+    ].join("\n");
+}
+
+async function notifyProductionRequest(song) {
+    const token = process.env.MAGIC_MUSIC_TELEGRAM_BOT_TOKEN;
+    const chatIds = (process.env.MAGIC_MUSIC_TELEGRAM_CHAT_IDS || process.env.MAGIC_MUSIC_TELEGRAM_CHAT_ID || "")
+        .split(",")
+        .map(id => id.trim())
+        .filter(Boolean);
+
+    if (!token || chatIds.length === 0) {
+        console.log(`Magic Music notification skipped for song ID ${song.id}: isolated Telegram vars are not configured.`);
+        return false;
+    }
+
+    const text = buildProductionMessage(song);
+    await Promise.all(chatIds.map(async chatId => {
+        const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                chat_id: chatId,
+                text
+            })
+        });
+
+        if (!response.ok) {
+            const body = await response.text();
+            throw new Error(`Telegram notification failed for chat ${chatId}: ${response.status} ${body}`);
+        }
+    }));
+
+    console.log(`Magic Music production notification sent for song ID ${song.id}.`);
+    return true;
+}
+
 const MIME_TYPES = {
     '.html': 'text/html; charset=utf-8',
     '.css': 'text/css; charset=utf-8',
@@ -318,6 +376,19 @@ const server = http.createServer(async (req, res) => {
 
             db.songs[songIndex].title = title || db.songs[songIndex].title;
             db.songs[songIndex].originalLyrics = originalLyrics || db.songs[songIndex].originalLyrics;
+            db.songs[songIndex].status = db.songs[songIndex].status || "pending_audio";
+
+            if (db.songs[songIndex].status === "pending_audio" && !db.songs[songIndex].productionNotifiedAt) {
+                try {
+                    const notified = await notifyProductionRequest(db.songs[songIndex]);
+                    if (notified) {
+                        db.songs[songIndex].productionNotifiedAt = new Date().toISOString();
+                    }
+                } catch (notifyError) {
+                    console.error("Production notification failed:", notifyError);
+                }
+            }
+
             writeDb(db);
 
             console.log(`Song ID ${songId} updated with new lyrics/title.`);
@@ -327,7 +398,54 @@ const server = http.createServer(async (req, res) => {
         }
     }
 
-    // 6. Purchase song confirmation (simulate purchase unlock)
+    // 6. Register production request from local fallback generator
+    if (req.method === 'POST' && pathname === '/api/production-request') {
+        try {
+            const { title, artist, language, category, coverColorHex, originalLyrics, romanization, durationSeconds, sunoPrompt } = await getJsonBody(req);
+            if (!title || !originalLyrics) {
+                return sendJson(res, 400, { error: "title and originalLyrics are required." });
+            }
+
+            const db = readDb();
+            const newSong = {
+                id: db.songs.length > 0 ? Math.max(...db.songs.map(s => s.id)) + 1 : 1,
+                title,
+                artist: artist || "Magic Music AI",
+                language: language || "Geral",
+                category: category || "Pop",
+                coverColorHex: coverColorHex || "0xFFF43F5E",
+                originalLyrics,
+                translatedLyrics: "Letra aprovada. Áudio final aguardando produção em estúdio.",
+                romanization: romanization || "",
+                durationSeconds: durationSeconds || 120,
+                sunoPrompt: sunoPrompt || "pop, portuguese vocals, personalized song",
+                audioUrl: null,
+                status: "pending_audio",
+                isPurchased: false,
+                isFavorite: false,
+                createdAt: new Date().toISOString()
+            };
+
+            try {
+                const notified = await notifyProductionRequest(newSong);
+                if (notified) {
+                    newSong.productionNotifiedAt = new Date().toISOString();
+                }
+            } catch (notifyError) {
+                console.error("Production notification failed:", notifyError);
+            }
+
+            db.songs.push(newSong);
+            writeDb(db);
+
+            console.log(`Production request saved. ID: ${newSong.id}`);
+            return sendJson(res, 200, { success: true, song: newSong });
+        } catch (e) {
+            return sendJson(res, 500, { error: e.message });
+        }
+    }
+
+    // 7. Purchase song confirmation (simulate purchase unlock)
     if (req.method === 'POST' && pathname === '/api/purchase-song') {
         try {
             const { songId } = await getJsonBody(req);
