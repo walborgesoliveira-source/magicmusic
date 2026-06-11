@@ -98,6 +98,33 @@ function getProductionUrl() {
     return process.env.PRODUCTION_ADMIN_URL || "http://magicmusic.5.189.152.8.nip.io";
 }
 
+function normalizeOptionalText(value) {
+    return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeContact(value) {
+    return normalizeOptionalText(value).toLowerCase().replace(/[\s().-]/g, "");
+}
+
+function toClientSong(song) {
+    return {
+        id: song.id,
+        title: song.title,
+        artist: song.artist,
+        language: song.language,
+        category: song.category,
+        coverColorHex: song.coverColorHex,
+        originalLyrics: song.originalLyrics,
+        translatedLyrics: song.translatedLyrics,
+        romanization: song.romanization,
+        durationSeconds: song.durationSeconds,
+        audioUrl: song.audioUrl || null,
+        status: song.status || "pending_audio",
+        isPurchased: Boolean(song.isPurchased),
+        createdAt: song.createdAt || null
+    };
+}
+
 function buildProductionMessage(song) {
     return [
         "Novo pedido Magic Music para produção",
@@ -108,6 +135,12 @@ function buildProductionMessage(song) {
         `Ocasião: ${song.language}`,
         `Estilo: ${song.category}`,
         `Vibe: ${song.romanization || "-"}`,
+        "",
+        "Contato do cliente:",
+        `Nome: ${song.customerName || "-"}`,
+        `WhatsApp: ${song.customerWhatsapp || "-"}`,
+        `E-mail: ${song.customerEmail || "-"}`,
+        `Observações: ${song.customerNotes || "-"}`,
         "",
         `Painel: ${getProductionUrl()}`,
         "",
@@ -331,7 +364,26 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 200, pending);
     }
 
-    // 4. Admin: Submit generated audio link
+    // 4. Client: Search own songs by WhatsApp or email
+    if (req.method === 'GET' && pathname === '/api/client/songs') {
+        const contact = normalizeContact(parsedUrl.searchParams.get("contact"));
+        if (!contact || contact.length < 5) {
+            return sendJson(res, 400, { error: "Informe WhatsApp ou e-mail para localizar seus pedidos." });
+        }
+
+        const db = readDb();
+        const matches = db.songs
+            .filter(song => {
+                const whatsapp = normalizeContact(song.customerWhatsapp);
+                const email = normalizeContact(song.customerEmail);
+                return whatsapp === contact || email === contact;
+            })
+            .map(toClientSong);
+
+        return sendJson(res, 200, matches);
+    }
+
+    // 5. Admin: Submit generated audio link
     if (req.method === 'POST' && pathname === '/api/admin/submit-audio') {
         if (!isAdminAuthorized(req)) {
             return sendJson(res, 401, { error: "Unauthorized." });
@@ -351,6 +403,7 @@ const server = http.createServer(async (req, res) => {
 
             db.songs[songIndex].audioUrl = audioUrl;
             db.songs[songIndex].status = "ready";
+            db.songs[songIndex].isPurchased = true;
             writeDb(db);
 
             console.log(`Suno audio linked to song ID ${songId}: ${audioUrl}`);
@@ -360,10 +413,10 @@ const server = http.createServer(async (req, res) => {
         }
     }
 
-    // 5. Update song lyrics/title from Step 4
+    // 6. Update song lyrics/title from Step 4
     if (req.method === 'POST' && pathname === '/api/update-song') {
         try {
-            const { songId, title, originalLyrics } = await getJsonBody(req);
+            const { songId, title, originalLyrics, customerName, customerWhatsapp, customerEmail, customerNotes } = await getJsonBody(req);
             if (!songId) {
                 return sendJson(res, 400, { error: "songId is required." });
             }
@@ -376,6 +429,10 @@ const server = http.createServer(async (req, res) => {
 
             db.songs[songIndex].title = title || db.songs[songIndex].title;
             db.songs[songIndex].originalLyrics = originalLyrics || db.songs[songIndex].originalLyrics;
+            db.songs[songIndex].customerName = normalizeOptionalText(customerName);
+            db.songs[songIndex].customerWhatsapp = normalizeOptionalText(customerWhatsapp);
+            db.songs[songIndex].customerEmail = normalizeOptionalText(customerEmail);
+            db.songs[songIndex].customerNotes = normalizeOptionalText(customerNotes);
             db.songs[songIndex].status = db.songs[songIndex].status || "pending_audio";
 
             if (db.songs[songIndex].status === "pending_audio" && !db.songs[songIndex].productionNotifiedAt) {
@@ -398,10 +455,10 @@ const server = http.createServer(async (req, res) => {
         }
     }
 
-    // 6. Register production request from local fallback generator
+    // 7. Register production request from local fallback generator
     if (req.method === 'POST' && pathname === '/api/production-request') {
         try {
-            const { title, artist, language, category, coverColorHex, originalLyrics, romanization, durationSeconds, sunoPrompt } = await getJsonBody(req);
+            const { title, artist, language, category, coverColorHex, originalLyrics, romanization, durationSeconds, sunoPrompt, customerName, customerWhatsapp, customerEmail, customerNotes } = await getJsonBody(req);
             if (!title || !originalLyrics) {
                 return sendJson(res, 400, { error: "title and originalLyrics are required." });
             }
@@ -419,6 +476,10 @@ const server = http.createServer(async (req, res) => {
                 romanization: romanization || "",
                 durationSeconds: durationSeconds || 120,
                 sunoPrompt: sunoPrompt || "pop, portuguese vocals, personalized song",
+                customerName: normalizeOptionalText(customerName),
+                customerWhatsapp: normalizeOptionalText(customerWhatsapp),
+                customerEmail: normalizeOptionalText(customerEmail),
+                customerNotes: normalizeOptionalText(customerNotes),
                 audioUrl: null,
                 status: "pending_audio",
                 isPurchased: false,
@@ -445,7 +506,7 @@ const server = http.createServer(async (req, res) => {
         }
     }
 
-    // 7. Purchase song confirmation (simulate purchase unlock)
+    // 8. Purchase song confirmation (simulate purchase unlock)
     if (req.method === 'POST' && pathname === '/api/purchase-song') {
         try {
             const { songId } = await getJsonBody(req);

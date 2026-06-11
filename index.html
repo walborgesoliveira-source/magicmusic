@@ -193,6 +193,22 @@
                         <label for="draft-lyrics">Edição da Letra Completa</label>
                         <textarea id="draft-lyrics" rows="12"></textarea>
                     </div>
+                    <div class="form-group">
+                        <label for="customer-name">Nome de quem vai receber o MP3</label>
+                        <input type="text" id="customer-name" placeholder="Ex: Pedro Souza">
+                    </div>
+                    <div class="form-group">
+                        <label for="customer-whatsapp">WhatsApp para entrega</label>
+                        <input type="tel" id="customer-whatsapp" placeholder="Ex: (21) 99999-9999">
+                    </div>
+                    <div class="form-group">
+                        <label for="customer-email">E-mail opcional</label>
+                        <input type="email" id="customer-email" placeholder="Ex: cliente@email.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="customer-notes">Observações para a produção</label>
+                        <textarea id="customer-notes" placeholder="Ex: entregar até sexta, voz masculina, evitar palavrões..." rows="3"></textarea>
+                    </div>
                     <div class="wizard-actions row-flex">
                         <button class="btn btn-secondary" onclick="resetWizard()">Refazer</button>
                         <button class="btn btn-success" onclick="finalizeProduction()">Enviar para Produção</button>
@@ -342,7 +358,34 @@
                 </div>
             </section>
 
-            <!-- TAB 5: ADMIN PANEL -->
+            <!-- TAB 5: CLIENT AREA -->
+            <section id="tab-client" class="tab-pane">
+                <div class="client-header">
+                    <h2>Área do Cliente</h2>
+                    <p>Acompanhe seus pedidos e baixe o MP3 quando a produção liberar a música.</p>
+                </div>
+
+                <div class="client-lookup-panel">
+                    <div class="form-group">
+                        <label for="client-contact">WhatsApp ou e-mail usado no pedido</label>
+                        <input type="text" id="client-contact" placeholder="Ex: (21) 99999-9999 ou cliente@email.com">
+                    </div>
+                    <button class="btn btn-primary client-search-btn" onclick="lookupClientSongs()">
+                        <i class="material-icons">search</i>
+                        Buscar pedidos
+                    </button>
+                </div>
+
+                <div id="client-results" class="client-results">
+                    <div class="client-empty-state">
+                        <i class="material-icons">account_circle</i>
+                        <h4>Entre com seu contato</h4>
+                        <p>Use o mesmo WhatsApp ou e-mail informado na criação da música.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 6: ADMIN PANEL -->
             <section id="tab-admin" class="tab-pane">
                 <div class="shop-header" style="border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 15px; margin-bottom: 20px;">
                     <h2>Painel de Produção (Admin)</h2>
@@ -381,6 +424,10 @@
             <div class="nav-item" data-tab="player" onclick="switchTab('player')">
                 <i class="material-icons">play_circle</i>
                 <span>Player</span>
+            </div>
+            <div class="nav-item" data-tab="client" onclick="switchTab('client')">
+                <i class="material-icons">person</i>
+                <span>Cliente</span>
             </div>
             <div class="nav-item" data-tab="shop" onclick="switchTab('shop')">
                 <i class="material-icons">shopping_bag</i>

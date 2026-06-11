@@ -364,7 +364,7 @@ body {
     color: var(--clear-white);
 }
 
-input[type="text"], textarea {
+input[type="text"], input[type="email"], input[type="tel"], textarea {
     width: 100%;
     background-color: var(--deep-space-card);
     border: 1px solid var(--dark-accent-border);
@@ -376,7 +376,7 @@ input[type="text"], textarea {
     transition: var(--transition-smooth);
 }
 
-input[type="text"]:focus, textarea:focus {
+input[type="text"]:focus, input[type="email"]:focus, input[type="tel"]:focus, textarea:focus {
     outline: none;
     border-color: var(--neon-pink);
     box-shadow: 0 0 8px rgba(244, 63, 94, 0.3);
@@ -570,6 +570,151 @@ input[type="text"]:focus, textarea:focus {
     flex-direction: column;
     gap: 10px;
     margin-top: 10px;
+}
+
+/* Client Area */
+.client-header h2 {
+    font-size: 24px;
+    font-weight: 900;
+    margin-bottom: 4px;
+}
+
+.client-header p {
+    font-size: 12px;
+    color: var(--light-gray-text);
+    line-height: 1.5;
+}
+
+.client-lookup-panel {
+    margin: 18px 0;
+    padding: 14px;
+    background-color: var(--deep-space-card);
+    border: 1px solid var(--dark-accent-border);
+    border-radius: var(--border-radius-md);
+}
+
+.client-search-btn {
+    width: 100%;
+}
+
+.client-results {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.client-empty-state {
+    text-align: center;
+    color: var(--light-gray-text);
+    padding: 34px 18px;
+    border: 1px dashed var(--dark-accent-border);
+    border-radius: var(--border-radius-md);
+    background-color: rgba(255, 255, 255, 0.02);
+}
+
+.client-empty-state i {
+    font-size: 40px;
+    color: var(--electric-indigo);
+    margin-bottom: 10px;
+}
+
+.client-empty-state h4 {
+    color: var(--clear-white);
+    font-size: 16px;
+    margin-bottom: 6px;
+}
+
+.client-empty-state p {
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.client-empty-state.client-error i {
+    color: #ef4444;
+}
+
+.client-song-card {
+    background-color: var(--deep-space-card);
+    border: 1px solid var(--dark-accent-border);
+    border-radius: var(--border-radius-md);
+    padding: 14px;
+}
+
+.client-song-top {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+}
+
+.client-cover {
+    width: 48px;
+    height: 48px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--clear-white);
+    flex: 0 0 auto;
+}
+
+.client-song-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.client-song-info h4 {
+    font-size: 15px;
+    font-weight: 800;
+    margin-bottom: 3px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.client-song-info p,
+.client-song-info span,
+.client-song-body p {
+    color: var(--light-gray-text);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.client-status {
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 900;
+    padding: 5px 8px;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.client-status.ready {
+    background-color: rgba(16, 185, 129, 0.16);
+    color: var(--emerald-green);
+}
+
+.client-status.pending {
+    background-color: rgba(245, 158, 11, 0.16);
+    color: var(--glowing-amber);
+}
+
+.client-song-body {
+    margin: 12px 0;
+    padding: 10px;
+    border-radius: var(--border-radius-sm);
+    background-color: rgba(255, 255, 255, 0.03);
+}
+
+.client-song-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.client-song-actions .btn {
+    width: 100%;
+    padding: 10px;
+    font-size: 12px;
 }
 
 /* Song Item Card */

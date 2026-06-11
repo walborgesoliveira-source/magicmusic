@@ -147,6 +147,8 @@ let wizardDraftSong = null;
 let currentQuizQuestion = null;
 let selectedPackAmount = null;
 let adminSessionPassword = "";
+let clientSongs = [];
+let clientLookupPerformed = false;
 
 // Web Audio API Synthesizer Context
 let audioCtx = null;
@@ -531,6 +533,8 @@ function switchTab(tabId) {
         renderPlayerScreen();
     } else if (tabId === "library") {
         renderLibraryScreen();
+    } else if (tabId === "client") {
+        renderClientArea();
     } else if (tabId === "admin") {
         renderAdminPendingList();
     }
@@ -546,6 +550,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     renderLibraryScreen();
     setupWizardListeners();
     setupPixClicker();
+    setupClientLookupListener();
     
     // Start visualizer animation loop
     drawVisualizerBars();
@@ -639,6 +644,17 @@ function updateCreditsUI() {
     document.getElementById("nav-credits-text").innerText = `Crédito: ${credits}`;
 }
 
+function setupClientLookupListener() {
+    const input = document.getElementById("client-contact");
+    if (!input) return;
+
+    input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+            lookupClientSongs();
+        }
+    });
+}
+
 // Wizard Step Navigation
 function goToStep(stepNumber) {
     wizardStep = stepNumber;
@@ -665,6 +681,10 @@ function goToStep(stepNumber) {
 function resetWizard() {
     document.getElementById("recipient-name").value = "";
     document.getElementById("key-stories").value = "";
+    document.getElementById("customer-name").value = "";
+    document.getElementById("customer-whatsapp").value = "";
+    document.getElementById("customer-email").value = "";
+    document.getElementById("customer-notes").value = "";
     document.querySelectorAll("#vibe-chips .chip").forEach(el => {
         el.classList.toggle("selected", el.getAttribute("data-vibe") === "Alegre" || el.getAttribute("data-vibe") === "Divertido");
     });
@@ -743,10 +763,23 @@ async function finalizeProduction() {
     
     const finalTitle = document.getElementById("draft-title").value;
     const finalLyrics = document.getElementById("draft-lyrics").value;
+    const customerName = document.getElementById("customer-name").value.trim();
+    const customerWhatsapp = document.getElementById("customer-whatsapp").value.trim();
+    const customerEmail = document.getElementById("customer-email").value.trim();
+    const customerNotes = document.getElementById("customer-notes").value.trim();
+
+    if (!customerWhatsapp) {
+        alert("Informe o WhatsApp para a equipe entregar o MP3 final.");
+        return;
+    }
     
     // Update local draft
     wizardDraftSong.title = finalTitle;
     wizardDraftSong.originalLyrics = finalLyrics;
+    wizardDraftSong.customerName = customerName;
+    wizardDraftSong.customerWhatsapp = customerWhatsapp;
+    wizardDraftSong.customerEmail = customerEmail;
+    wizardDraftSong.customerNotes = customerNotes;
     
     openModal("production-modal");
     
@@ -768,7 +801,11 @@ async function finalizeProduction() {
                 body: JSON.stringify({
                     songId: wizardDraftSong.id,
                     title: finalTitle,
-                    originalLyrics: finalLyrics
+                    originalLyrics: finalLyrics,
+                    customerName,
+                    customerWhatsapp,
+                    customerEmail,
+                    customerNotes
                 })
             });
             
@@ -1335,6 +1372,134 @@ function buyCredits(amount) {
     openModal("pix-modal");
 }
 
+// Client area: lookup and delivery
+async function lookupClientSongs() {
+    const input = document.getElementById("client-contact");
+    const contact = input ? input.value.trim() : "";
+
+    if (!contact || contact.length < 5) {
+        alert("Informe o WhatsApp ou e-mail usado no pedido.");
+        return;
+    }
+
+    const container = document.getElementById("client-results");
+    if (container) {
+        container.innerHTML = `<div class="client-empty-state"><i class="material-icons">hourglass_top</i><h4>Buscando pedidos</h4><p>Consultando as músicas vinculadas ao seu contato.</p></div>`;
+    }
+
+    try {
+        const response = await fetch(`/api/client/songs?contact=${encodeURIComponent(contact)}`);
+        if (!response.ok) {
+            throw new Error(`Server returned status ${response.status}`);
+        }
+
+        clientLookupPerformed = true;
+        clientSongs = await response.json();
+        renderClientArea();
+    } catch (e) {
+        console.error(e);
+        if (container) {
+            container.innerHTML = `<div class="client-empty-state client-error"><i class="material-icons">error</i><h4>Não foi possível buscar</h4><p>Confira o contato informado e tente novamente.</p></div>`;
+        }
+    }
+}
+
+function renderClientArea() {
+    const container = document.getElementById("client-results");
+    if (!container) return;
+
+    if (!Array.isArray(clientSongs) || clientSongs.length === 0) {
+        const initialTitle = clientLookupPerformed ? "Nenhum pedido encontrado" : "Entre com seu contato";
+        const initialText = clientLookupPerformed
+            ? "Digite o mesmo WhatsApp ou e-mail usado quando a música foi enviada para produção."
+            : "Use o mesmo WhatsApp ou e-mail informado na criação da música.";
+        const initialIcon = clientLookupPerformed ? "manage_search" : "account_circle";
+
+        container.innerHTML = `
+            <div class="client-empty-state">
+                <i class="material-icons">${initialIcon}</i>
+                <h4>${initialTitle}</h4>
+                <p>${initialText}</p>
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = "";
+    clientSongs
+        .slice()
+        .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+        .forEach(song => {
+            const card = document.createElement("div");
+            const ready = song.status === "ready" && Boolean(song.audioUrl);
+            const color = (song.coverColorHex || "0xFFF43F5E").replace("0xFF", "#");
+            const safeTitle = escapeHtml(song.title);
+            const safeCategory = escapeHtml(song.category);
+            const safeOccasion = escapeHtml(song.language);
+            const safeCreatedAt = song.createdAt ? new Date(song.createdAt).toLocaleDateString("pt-BR") : "-";
+
+            card.className = "client-song-card";
+            card.innerHTML = `
+                <div class="client-song-top">
+                    <div class="client-cover" style="background-color: ${color}">
+                        <i class="material-icons">music_note</i>
+                    </div>
+                    <div class="client-song-info">
+                        <h4>${safeTitle}</h4>
+                        <p>${safeOccasion} · ${safeCategory}</p>
+                        <span>Pedido em ${safeCreatedAt}</span>
+                    </div>
+                    <span class="client-status ${ready ? "ready" : "pending"}">${ready ? "Pronta" : "Em produção"}</span>
+                </div>
+                <div class="client-song-body">
+                    <p>${ready ? "Seu MP3 final já está liberado para ouvir e baixar." : "A equipe recebeu a letra e está produzindo o áudio final. Volte aqui com seu WhatsApp/e-mail para acompanhar."}</p>
+                </div>
+                <div class="client-song-actions">
+                    <button class="btn btn-secondary" onclick="openClientSong(${song.id})">
+                        <i class="material-icons">${ready ? "play_arrow" : "lyrics"}</i>
+                        ${ready ? "Ouvir" : "Ver letra"}
+                    </button>
+                    <button class="btn btn-success" ${ready ? "" : "disabled"} onclick="downloadClientSong(${song.id})">
+                        <i class="material-icons">download</i>
+                        Baixar MP3
+                    </button>
+                </div>
+            `;
+            container.appendChild(card);
+        });
+}
+
+function openClientSong(songId) {
+    const song = clientSongs.find(item => item.id === songId);
+    if (!song) return;
+
+    song.isPurchased = true;
+    const existingIndex = songs.findIndex(item => item.id === song.id);
+    if (existingIndex >= 0) {
+        songs[existingIndex] = { ...songs[existingIndex], ...song, isPurchased: true };
+    } else {
+        songs.push({ ...song, isFavorite: false, isPurchased: true });
+    }
+    AppDB.saveSongs(songs);
+    selectSong(song);
+}
+
+function downloadClientSong(songId) {
+    const song = clientSongs.find(item => item.id === songId);
+    if (!song || song.status !== "ready" || !song.audioUrl) {
+        alert("O MP3 final ainda não está disponível.");
+        return;
+    }
+
+    const link = document.createElement("a");
+    link.href = song.audioUrl;
+    link.download = `${song.title}.mp3`;
+    link.target = "_blank";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
 // --- ADMIN MODE & WEB AUDIO PREVIEW INTEGRATION ---
 let purchasingSongId = null;
 
@@ -1382,6 +1547,15 @@ function getAdminHeaders() {
     };
 }
 
+function escapeHtml(value) {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
 async function renderAdminPendingList() {
     const container = document.getElementById("admin-pending-list");
     if (!container) return;
@@ -1417,22 +1591,37 @@ async function renderAdminPendingList() {
         container.innerHTML = "";
         pendingSongs.forEach(song => {
             const card = document.createElement("div");
+            const recipient = song.artist?.split('&')[1]?.trim() || "Desconhecido";
+            const safeTitle = escapeHtml(song.title);
+            const safeCategory = escapeHtml(song.category);
+            const safeRecipient = escapeHtml(recipient);
+            const safeSunoPrompt = escapeHtml(song.sunoPrompt);
+            const safeLyrics = escapeHtml(song.originalLyrics);
+            const safeCustomerName = escapeHtml(song.customerName || "-");
+            const safeCustomerWhatsapp = escapeHtml(song.customerWhatsapp || "-");
+            const safeCustomerEmail = escapeHtml(song.customerEmail || "-");
+            const safeCustomerNotes = escapeHtml(song.customerNotes || "-");
             card.className = "pending-admin-card";
             card.style = "background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; margin-bottom: 15px;";
             
             card.innerHTML = `
                 <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 8px; margin-bottom: 10px;">
                     <div>
-                        <h4 style="color: #fff; font-size: 15px;">${song.title}</h4>
-                        <p style="font-size: 12px; color: #a1a1aa;">Estilo: <strong>${song.category}</strong> | Destinatário: <strong>${song.artist.split('&')[1]?.trim() || 'Desconhecido'}</strong></p>
+                        <h4 style="color: #fff; font-size: 15px;">${safeTitle}</h4>
+                        <p style="font-size: 12px; color: #a1a1aa;">Estilo: <strong>${safeCategory}</strong> | Destinatário: <strong>${safeRecipient}</strong></p>
                     </div>
                     <span style="font-size: 11px; padding: 2px 6px; background: rgba(245, 158, 11, 0.1); color: #f59e0b; border-radius: 4px;">Aguardando Suno</span>
+                </div>
+
+                <div style="margin-bottom: 12px; background: rgba(16, 185, 129, 0.06); border: 1px solid rgba(16, 185, 129, 0.12); border-radius: 6px; padding: 10px;">
+                    <p style="font-size: 12px; color: #d4d4d8; margin-bottom: 6px;"><strong>Contato para entrega</strong></p>
+                    <p style="font-size: 12px; color: #a1a1aa; line-height: 1.5;">Nome: <strong style="color: #fff;">${safeCustomerName}</strong><br>WhatsApp: <strong style="color: #fff;">${safeCustomerWhatsapp}</strong><br>E-mail: <strong style="color: #fff;">${safeCustomerEmail}</strong><br>Obs.: <strong style="color: #fff;">${safeCustomerNotes}</strong></p>
                 </div>
                 
                 <div style="margin-bottom: 10px;">
                     <p style="font-size: 12px; color: #a1a1aa; margin-bottom: 4px;"><strong>Prompt do Suno (Crie no Suno com este estilo):</strong></p>
                     <div style="display: flex; gap: 8px;">
-                        <input type="text" readonly value="${song.sunoPrompt}" id="suno-prompt-${song.id}" style="flex: 1; background: #000; border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 4px 8px; font-size: 12px; border-radius: 4px;">
+                        <input type="text" readonly value="${safeSunoPrompt}" id="suno-prompt-${song.id}" style="flex: 1; background: #000; border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 4px 8px; font-size: 12px; border-radius: 4px;">
                         <button onclick="copyTextById('suno-prompt-${song.id}')" style="background: #27272a; border: none; color: #fff; padding: 4px 10px; font-size: 12px; border-radius: 4px; cursor: pointer;">Copiar</button>
                     </div>
                 </div>
@@ -1440,7 +1629,7 @@ async function renderAdminPendingList() {
                 <div style="margin-bottom: 12px;">
                     <p style="font-size: 12px; color: #a1a1aa; margin-bottom: 4px;"><strong>Letra Gerada (Use no modo Custom no Suno):</strong></p>
                     <div style="display: flex; gap: 8px;">
-                        <textarea readonly id="suno-lyrics-${song.id}" style="flex: 1; height: 60px; background: #000; border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 4px 8px; font-size: 11px; border-radius: 4px; resize: none; font-family: monospace;">${song.originalLyrics}</textarea>
+                        <textarea readonly id="suno-lyrics-${song.id}" style="flex: 1; height: 60px; background: #000; border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 4px 8px; font-size: 11px; border-radius: 4px; resize: none; font-family: monospace;">${safeLyrics}</textarea>
                         <button onclick="copyTextById('suno-lyrics-${song.id}')" style="background: #27272a; border: none; color: #fff; padding: 4px 10px; font-size: 12px; border-radius: 4px; cursor: pointer; align-self: flex-start;">Copiar</button>
                     </div>
                 </div>
