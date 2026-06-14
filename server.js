@@ -33,8 +33,54 @@ function loadEnv() {
 }
 loadEnv();
 
+const { Pool } = require('pg');
+
+const pool = new Pool({
+    host:     process.env.MAGIC_MUSIC_DB_HOST || 'magic_music_db',
+    port:     parseInt(process.env.MAGIC_MUSIC_DB_PORT || '5432'),
+    database: process.env.MAGIC_MUSIC_DB_NAME || 'magic_music',
+    user:     process.env.MAGIC_MUSIC_DB_USER || 'magic_music_user',
+    password: process.env.MAGIC_MUSIC_DB_PASSWORD || '',
+});
+
+// Helper: converte row do postgres (snake_case) para objeto song (camelCase)
+function rowToSong(row) {
+    return {
+        id:                     row.id,
+        title:                  row.title,
+        artist:                 row.artist,
+        language:               row.language,
+        category:               row.category,
+        coverColorHex:          row.cover_color_hex,
+        originalLyrics:         row.original_lyrics,
+        translatedLyrics:       row.translated_lyrics,
+        romanization:           row.romanization,
+        durationSeconds:        row.duration_seconds,
+        sunoPrompt:             row.suno_prompt,
+        customerName:           row.customer_name,
+        customerWhatsapp:       row.customer_whatsapp,
+        customerCpf:            row.customer_cpf,
+        customerEmail:          row.customer_email,
+        customerNotes:          row.customer_notes,
+        audioUrl:               row.audio_url,
+        previewUrl:             row.preview_url,
+        coverUrl:               row.cover_url,
+        status:                 row.status,
+        approvalToken:          row.approval_token,
+        paymentStatus:          row.payment_status,
+        paymentProvider:        row.payment_provider,
+        pixTransactionId:       row.pix_transaction_id,
+        paidAt:                 row.paid_at,
+        deliveredAt:            row.delivered_at,
+        adjustmentHistory:      row.adjustment_history || [],
+        isFavorite:             row.is_favorite,
+        isPurchased:            row.is_purchased,
+        productionNotifiedAt:   row.production_notified_at,
+        createdAt:              row.created_at,
+    };
+}
+
 const PORT = process.env.PORT || 3000;
-const DB_PATH = path.join(__dirname, 'db.json');
 const STORAGE_PATH = path.join(__dirname, 'storage', 'orders');
 const LOGS_PATH = path.join(__dirname, 'logs');
 
@@ -42,29 +88,6 @@ const LOGS_PATH = path.join(__dirname, 'logs');
 [STORAGE_PATH, LOGS_PATH, path.join(__dirname, 'backups')].forEach(dir => {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
-
-// Helper to load songs from local JSON database
-function readDb() {
-    try {
-        if (!fs.existsSync(DB_PATH)) {
-            fs.writeFileSync(DB_PATH, JSON.stringify({ songs: [] }, null, 2));
-        }
-        const data = fs.readFileSync(DB_PATH, 'utf8');
-        return JSON.parse(data);
-    } catch (error) {
-        console.error("Error reading database:", error);
-        return { songs: [] };
-    }
-}
-
-// Helper to write songs to local JSON database
-function writeDb(data) {
-    try {
-        fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2));
-    } catch (error) {
-        console.error("Error writing database:", error);
-    }
-}
 
 // --- V2 STORAGE & PREVIEW HELPERS ---
 
@@ -388,11 +411,11 @@ const server = http.createServer(async (req, res) => {
             }
 
             const vibesText = Array.isArray(vibes) ? vibes.join(', ') : (vibes || "alegre");
-            
+
             const prompt = `
                 Você é o compositor poético profissional do Magic Music (magicmusic.com), uma IA de criação musical personalizada em português.
                 Sua missão é criar a letra de uma canção personalizada com rimas perfeitas, ritmo incrível e alto impacto emocional ou engraçado.
-                
+
                 Informações do destinatário:
                 - Ocasião: ${occasion || "Geral"}
                 - Estilo Musical: ${style || "Pop"}
@@ -406,16 +429,16 @@ const server = http.createServer(async (req, res) => {
                 - A letra DEVE conter exatamente de 4 a 6 estrofes intercaladas com um Refrão marcante. Ex:
                   [Verso 1]
                   (linhas de verso)
-                  
+
                   [Refrão]
                   (linhas de refrão)
-                  
+
                   [Verso 2]
                   (linhas de verso)
-                  
+
                   [Refrão]
                   (linhas de refrão)
-                  
+
                   [Outro]
                   (linhas de desfecho)
                 - Mantenha cada linha curta, limpa e poética. Use boas rimas (AABB, ABAB, etc.).
@@ -435,7 +458,7 @@ const server = http.createServer(async (req, res) => {
             const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
             console.log(`Calling Gemini API (${modelName}) to generate lyrics for ${name}...`);
-            
+
             const response = await fetch(geminiUrl, {
                 method: 'POST',
                 headers: {
@@ -463,47 +486,37 @@ const server = http.createServer(async (req, res) => {
             const responseData = await response.json();
             const candidate = responseData.candidates?.[0];
             const textOutput = candidate?.content?.parts?.[0]?.text;
-            
+
             if (!textOutput) {
                 throw new Error("No text output received from Gemini.");
             }
 
             const parsedJson = JSON.parse(textOutput.trim());
-            
+
             const colors = ["0xFFF43F5E", "0xFF8B5CF6", "0xFFD946EF", "0xFF06B6D4", "0xFF10B981", "0xFFF59E0B"];
             const randomColor = colors[Math.floor(Math.random() * colors.length)];
 
-            const db = readDb();
-            const newSong = {
-                id: db.songs.length > 0 ? Math.max(...db.songs.map(s => s.id)) + 1 : 1,
-                title: parsedJson.title || `Canção para ${name}`,
-                artist: parsedJson.artist || `Magic Music AI & ${name}`,
-                language: occasion || "Geral",
-                category: style || "Pop",
-                coverColorHex: randomColor,
-                originalLyrics: parsedJson.lyrics || "",
-                translatedLyrics: "Sincronizada via TTS. Gênero: " + style,
-                romanization: vibesText,
-                durationSeconds: parsedJson.durationSeconds || 120,
-                sunoPrompt: parsedJson.sunoPrompt || "pop, male vocals",
-                audioUrl: null,
-                previewUrl: null,
-                coverUrl: null,
-                status: "pending_audio",
-                approvalToken: generateApprovalToken(),
-                paymentStatus: null,
-                paymentProvider: null,
-                pixTransactionId: null,
-                paidAt: null,
-                deliveredAt: null,
-                adjustmentHistory: [],
-                isPurchased: false,
-                isFavorite: false,
-                createdAt: new Date().toISOString()
-            };
-
-            db.songs.push(newSong);
-            writeDb(db);
+            const result = await pool.query(`
+                INSERT INTO songs (title, artist, language, category, cover_color_hex, original_lyrics,
+                    translated_lyrics, romanization, duration_seconds, suno_prompt,
+                    approval_token, status, created_at)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'pending_audio',NOW())
+                RETURNING *`,
+                [
+                    parsedJson.title || `Canção para ${name}`,
+                    parsedJson.artist || `Magic Music AI & ${name}`,
+                    occasion || 'Geral',
+                    style || 'Pop',
+                    randomColor,
+                    parsedJson.lyrics || '',
+                    'Sincronizada via TTS. Gênero: ' + style,
+                    vibesText,
+                    parsedJson.durationSeconds || 120,
+                    parsedJson.sunoPrompt || 'pop, male vocals',
+                    generateApprovalToken(),
+                ]
+            );
+            const newSong = rowToSong(result.rows[0]);
 
             console.log(`Lyrics generated and song saved. ID: ${newSong.id}`);
             return sendJson(res, 200, newSong);
@@ -514,10 +527,15 @@ const server = http.createServer(async (req, res) => {
         }
     }
 
-    // 2. Fetch all songs
+    // 2. Fetch all songs (admin)
     if (req.method === 'GET' && pathname === '/api/songs') {
-        const db = readDb();
-        return sendJson(res, 200, db.songs);
+        if (!isAdminAuthorized(req)) return sendJson(res, 401, { error: "Unauthorized." });
+        try {
+            const result = await pool.query('SELECT * FROM songs ORDER BY id DESC');
+            return sendJson(res, 200, result.rows.map(rowToSong));
+        } catch (e) {
+            return sendJson(res, 500, { error: e.message });
+        }
     }
 
     // 3. Admin: Get pending songs (pending_audio + adjustment_requested = need action)
@@ -525,10 +543,12 @@ const server = http.createServer(async (req, res) => {
         if (!isAdminAuthorized(req)) {
             return sendJson(res, 401, { error: "Unauthorized." });
         }
-
-        const db = readDb();
-        const pending = db.songs.filter(s => ['pending_audio', 'adjustment_requested'].includes(s.status));
-        return sendJson(res, 200, pending);
+        try {
+            const result = await pool.query(`SELECT * FROM songs WHERE status IN ('pending_audio','adjustment_requested') ORDER BY id DESC`);
+            return sendJson(res, 200, result.rows.map(rowToSong));
+        } catch (e) {
+            return sendJson(res, 500, { error: e.message });
+        }
     }
 
     // 4. Client: Search own songs by WhatsApp or email
@@ -538,99 +558,15 @@ const server = http.createServer(async (req, res) => {
             return sendJson(res, 400, { error: "Informe WhatsApp ou e-mail para localizar seus pedidos." });
         }
 
-        const db = readDb();
-        const matches = db.songs
-            .filter(song => {
-                const whatsapp = normalizeContact(song.customerWhatsapp);
-                const email = normalizeContact(song.customerEmail);
-                return whatsapp === contact || email === contact;
-            })
-            .map(toClientSong);
-
-        return sendJson(res, 200, matches);
-    }
-
-    // 5. Admin: Submit generated audio link (v2.0: download + FFmpeg preview + preview_ready)
-    if (req.method === 'POST' && pathname === '/api/admin/submit-audio') {
-        if (!isAdminAuthorized(req)) {
-            return sendJson(res, 401, { error: "Unauthorized." });
-        }
-
         try {
-            const { songId, audioUrl } = await getJsonBody(req);
-            if (!songId || !audioUrl) {
-                return sendJson(res, 400, { error: "songId and audioUrl are required." });
-            }
-
-            const db = readDb();
-            const songIndex = db.songs.findIndex(s => s.id === parseInt(songId));
-            if (songIndex === -1) {
-                return sendJson(res, 404, { error: "Song not found." });
-            }
-
-            const song = db.songs[songIndex];
-
-            // Ensure approvalToken exists (for songs created before v2.0)
-            if (!song.approvalToken) {
-                song.approvalToken = generateApprovalToken();
-            }
-            if (!Array.isArray(song.adjustmentHistory)) song.adjustmentHistory = [];
-
-            const orderDir = ensureOrderDir(song.id);
-            const musicaPath = path.join(orderDir, 'musica.mp3');
-            const previewPath = path.join(orderDir, 'preview.mp3');
-
-            let previewGenerated = false;
-            let downloadedLocally = false;
-
-            try {
-                await downloadMp3(audioUrl, musicaPath);
-                downloadedLocally = true;
-                logEvent('mp3_downloaded', { songId: song.id });
-            } catch (dlErr) {
-                console.error(`MP3 download failed for song ${song.id}:`, dlErr.message);
-                logEvent('download_error', { songId: song.id, error: dlErr.message });
-            }
-
-            if (downloadedLocally) {
-                try {
-                    await generatePreview(musicaPath, previewPath);
-                    previewGenerated = true;
-                    logEvent('preview_generated', { songId: song.id });
-                } catch (ffmpegErr) {
-                    console.error(`FFmpeg failed for song ${song.id}:`, ffmpegErr.message);
-                    logEvent('ffmpeg_error', { songId: song.id, error: ffmpegErr.message });
-                }
-            }
-
-            song.audioUrl = audioUrl;
-            song.status = 'preview_ready';
-            song.isPurchased = false;
-            song.previewUrl = previewGenerated
-                ? `/api/preview/${song.approvalToken}`
-                : audioUrl;
-
-            db.songs[songIndex] = song;
-            writeDb(db);
-
-            const baseUrl = getProductionUrl();
-            const approvalUrl = `${baseUrl}/pedido/${song.approvalToken}`;
-
-            try {
-                await notifyPreviewReady(song, approvalUrl);
-            } catch (notifyErr) {
-                console.error('Preview notification failed:', notifyErr.message);
-            }
-
-            logEvent('preview_ready', { songId: song.id, previewGenerated, downloadedLocally });
-            console.log(`Song ${songId} → preview_ready. preview gerado: ${previewGenerated}`);
-
-            return sendJson(res, 200, {
-                success: true,
-                song: db.songs[songIndex],
-                previewGenerated,
-                approvalUrl
-            });
+            const result = await pool.query(`
+                SELECT * FROM songs
+                WHERE REGEXP_REPLACE(LOWER(customer_whatsapp), '[\\s().\\-]', '', 'g') = $1
+                   OR REGEXP_REPLACE(LOWER(customer_email), '[\\s().\\-]', '', 'g') = $1
+                ORDER BY id DESC`,
+                [contact]
+            );
+            return sendJson(res, 200, result.rows.map(rowToSong).map(toClientSong));
         } catch (e) {
             return sendJson(res, 500, { error: e.message });
         }
@@ -644,36 +580,47 @@ const server = http.createServer(async (req, res) => {
                 return sendJson(res, 400, { error: "songId is required." });
             }
 
-            const db = readDb();
-            const songIndex = db.songs.findIndex(s => s.id === parseInt(songId));
-            if (songIndex === -1) {
+            const result = await pool.query(`
+                UPDATE songs SET
+                    title = COALESCE(NULLIF($1,''), title),
+                    original_lyrics = COALESCE(NULLIF($2,''), original_lyrics),
+                    customer_name = $3,
+                    customer_whatsapp = $4,
+                    customer_cpf = $5,
+                    customer_email = $6,
+                    customer_notes = $7
+                WHERE id = $8 RETURNING *`,
+                [
+                    title,
+                    originalLyrics,
+                    normalizeOptionalText(customerName),
+                    normalizeOptionalText(customerWhatsapp),
+                    normalizeOptionalText(customerCpf).replace(/\D/g, ''),
+                    normalizeOptionalText(customerEmail),
+                    normalizeOptionalText(customerNotes),
+                    parseInt(songId)
+                ]
+            );
+            if (result.rows.length === 0) {
                 return sendJson(res, 404, { error: "Song not found." });
             }
 
-            db.songs[songIndex].title = title || db.songs[songIndex].title;
-            db.songs[songIndex].originalLyrics = originalLyrics || db.songs[songIndex].originalLyrics;
-            db.songs[songIndex].customerName = normalizeOptionalText(customerName);
-            db.songs[songIndex].customerWhatsapp = normalizeOptionalText(customerWhatsapp);
-            db.songs[songIndex].customerCpf = normalizeOptionalText(customerCpf).replace(/\D/g, '');
-            db.songs[songIndex].customerEmail = normalizeOptionalText(customerEmail);
-            db.songs[songIndex].customerNotes = normalizeOptionalText(customerNotes);
-            db.songs[songIndex].status = db.songs[songIndex].status || "pending_audio";
+            let song = rowToSong(result.rows[0]);
 
-            if (db.songs[songIndex].status === "pending_audio" && !db.songs[songIndex].productionNotifiedAt) {
+            if (song.status === 'pending_audio' && !song.productionNotifiedAt) {
                 try {
-                    const notified = await notifyProductionRequest(db.songs[songIndex]);
+                    const notified = await notifyProductionRequest(song);
                     if (notified) {
-                        db.songs[songIndex].productionNotifiedAt = new Date().toISOString();
+                        await pool.query('UPDATE songs SET production_notified_at=NOW() WHERE id=$1', [song.id]);
+                        song.productionNotifiedAt = new Date().toISOString();
                     }
                 } catch (notifyError) {
                     console.error("Production notification failed:", notifyError);
                 }
             }
 
-            writeDb(db);
-
             console.log(`Song ID ${songId} updated with new lyrics/title.`);
-            return sendJson(res, 200, { success: true, song: db.songs[songIndex] });
+            return sendJson(res, 200, { success: true, song });
         } catch (e) {
             return sendJson(res, 500, { error: e.message });
         }
@@ -687,51 +634,43 @@ const server = http.createServer(async (req, res) => {
                 return sendJson(res, 400, { error: "title and originalLyrics are required." });
             }
 
-            const db = readDb();
-            const newSong = {
-                id: db.songs.length > 0 ? Math.max(...db.songs.map(s => s.id)) + 1 : 1,
-                title,
-                artist: artist || "Magic Music AI",
-                language: language || "Geral",
-                category: category || "Pop",
-                coverColorHex: coverColorHex || "0xFFF43F5E",
-                originalLyrics,
-                translatedLyrics: "Letra aprovada. Áudio final aguardando produção em estúdio.",
-                romanization: romanization || "",
-                durationSeconds: durationSeconds || 120,
-                sunoPrompt: sunoPrompt || "pop, portuguese vocals, personalized song",
-                customerName: normalizeOptionalText(customerName),
-                customerWhatsapp: normalizeOptionalText(customerWhatsapp),
-                customerCpf: normalizeOptionalText(customerCpf).replace(/\D/g, ''),
-                customerEmail: normalizeOptionalText(customerEmail),
-                customerNotes: normalizeOptionalText(customerNotes),
-                audioUrl: null,
-                previewUrl: null,
-                coverUrl: null,
-                status: "pending_audio",
-                approvalToken: generateApprovalToken(),
-                paymentStatus: null,
-                paymentProvider: null,
-                pixTransactionId: null,
-                paidAt: null,
-                deliveredAt: null,
-                adjustmentHistory: [],
-                isPurchased: false,
-                isFavorite: false,
-                createdAt: new Date().toISOString()
-            };
+            const insertResult = await pool.query(`
+                INSERT INTO songs (title, artist, language, category, cover_color_hex, original_lyrics,
+                    translated_lyrics, romanization, duration_seconds, suno_prompt,
+                    customer_name, customer_whatsapp, customer_cpf, customer_email, customer_notes,
+                    status, approval_token, created_at)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'pending_audio',$16,NOW())
+                RETURNING *`,
+                [
+                    title,
+                    artist || 'Magic Music AI',
+                    language || 'Geral',
+                    category || 'Pop',
+                    coverColorHex || '0xFFF43F5E',
+                    originalLyrics,
+                    'Letra aprovada. Áudio final aguardando produção em estúdio.',
+                    romanization || '',
+                    durationSeconds || 120,
+                    sunoPrompt || 'pop, portuguese vocals, personalized song',
+                    normalizeOptionalText(customerName),
+                    normalizeOptionalText(customerWhatsapp),
+                    normalizeOptionalText(customerCpf).replace(/\D/g, ''),
+                    normalizeOptionalText(customerEmail),
+                    normalizeOptionalText(customerNotes),
+                    generateApprovalToken(),
+                ]
+            );
+            let newSong = rowToSong(insertResult.rows[0]);
 
             try {
                 const notified = await notifyProductionRequest(newSong);
                 if (notified) {
+                    await pool.query('UPDATE songs SET production_notified_at=NOW() WHERE id=$1', [newSong.id]);
                     newSong.productionNotifiedAt = new Date().toISOString();
                 }
             } catch (notifyError) {
                 console.error("Production notification failed:", notifyError);
             }
-
-            db.songs.push(newSong);
-            writeDb(db);
 
             console.log(`Production request saved. ID: ${newSong.id}`);
             return sendJson(res, 200, { success: true, song: newSong });
@@ -740,39 +679,18 @@ const server = http.createServer(async (req, res) => {
         }
     }
 
-    // 8. Purchase song confirmation (simulate purchase unlock)
-    if (req.method === 'POST' && pathname === '/api/purchase-song') {
-        try {
-            const { songId } = await getJsonBody(req);
-            if (!songId) {
-                return sendJson(res, 400, { error: "songId is required." });
-            }
-
-            const db = readDb();
-            const songIndex = db.songs.findIndex(s => s.id === parseInt(songId));
-            if (songIndex === -1) {
-                return sendJson(res, 404, { error: "Song not found." });
-            }
-
-            db.songs[songIndex].isPurchased = true;
-            writeDb(db);
-
-            console.log(`Song ID ${songId} marked as purchased.`);
-            return sendJson(res, 200, { success: true, song: db.songs[songIndex] });
-        } catch (e) {
-            return sendJson(res, 500, { error: e.message });
-        }
-    }
-
     // 9. Admin: All orders with optional status filter
     if (req.method === 'GET' && pathname === '/api/admin/orders') {
         if (!isAdminAuthorized(req)) return sendJson(res, 401, { error: "Unauthorized." });
-        const filter = parsedUrl.searchParams.get('status');
-        const db = readDb();
-        const orders = filter && filter !== 'all'
-            ? db.songs.filter(s => s.status === filter)
-            : db.songs;
-        return sendJson(res, 200, orders.slice().sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)));
+        try {
+            const filter = parsedUrl.searchParams.get('status');
+            const result = filter && filter !== 'all'
+                ? await pool.query('SELECT * FROM songs WHERE status=$1 ORDER BY id DESC', [filter])
+                : await pool.query('SELECT * FROM songs ORDER BY id DESC');
+            return sendJson(res, 200, result.rows.map(rowToSong));
+        } catch (e) {
+            return sendJson(res, 500, { error: e.message });
+        }
     }
 
     // 10. Get order by approval token (public)
@@ -781,10 +699,13 @@ const server = http.createServer(async (req, res) => {
         !pathname.startsWith('/api/order/request-adjustment')) {
         const token = pathname.replace('/api/order/', '');
         if (!token) return sendJson(res, 400, { error: "Token obrigatório." });
-        const db = readDb();
-        const song = db.songs.find(s => s.approvalToken === token);
-        if (!song) return sendJson(res, 404, { error: "Pedido não encontrado." });
-        return sendJson(res, 200, toClientSong(song));
+        try {
+            const result = await pool.query('SELECT * FROM songs WHERE approval_token=$1', [token]);
+            if (result.rows.length === 0) return sendJson(res, 404, { error: "Pedido não encontrado." });
+            return sendJson(res, 200, toClientSong(rowToSong(result.rows[0])));
+        } catch (e) {
+            return sendJson(res, 500, { error: e.message });
+        }
     }
 
     // 11. Approve order (public, by token)
@@ -792,17 +713,20 @@ const server = http.createServer(async (req, res) => {
         try {
             const { token } = await getJsonBody(req);
             if (!token) return sendJson(res, 400, { error: "Token obrigatório." });
-            const db = readDb();
-            const idx = db.songs.findIndex(s => s.approvalToken === token);
-            if (idx === -1) return sendJson(res, 404, { error: "Pedido não encontrado." });
-            const song = db.songs[idx];
+
+            // Busca para validar status atual
+            const songRes = await pool.query('SELECT * FROM songs WHERE approval_token=$1', [token]);
+            if (songRes.rows.length === 0) return sendJson(res, 404, { error: "Pedido não encontrado." });
+            const song = rowToSong(songRes.rows[0]);
             if (!['preview_ready', 'adjustment_requested'].includes(song.status)) {
                 return sendJson(res, 400, { error: `Status atual não permite aprovação: ${song.status}` });
             }
-            song.status = 'awaiting_payment';
-            db.songs[idx] = song;
-            writeDb(db);
-            logEvent('order_approved', { songId: song.id });
+
+            const result = await pool.query(`
+                UPDATE songs SET status='awaiting_payment' WHERE approval_token=$1
+                RETURNING *`, [token]
+            );
+            logEvent('order_approved', { songId: result.rows[0].id });
             return sendJson(res, 200, { success: true, status: 'awaiting_payment' });
         } catch (e) {
             return sendJson(res, 500, { error: e.message });
@@ -814,17 +738,21 @@ const server = http.createServer(async (req, res) => {
         try {
             const { token, description } = await getJsonBody(req);
             if (!token || !description) return sendJson(res, 400, { error: "Token e descrição são obrigatórios." });
-            const db = readDb();
-            const idx = db.songs.findIndex(s => s.approvalToken === token);
-            if (idx === -1) return sendJson(res, 404, { error: "Pedido não encontrado." });
-            const song = db.songs[idx];
-            song.status = 'adjustment_requested';
-            if (!Array.isArray(song.adjustmentHistory)) song.adjustmentHistory = [];
-            song.adjustmentHistory.push({ description: description.trim(), requestedAt: new Date().toISOString() });
-            db.songs[idx] = song;
-            writeDb(db);
-            logEvent('adjustment_requested', { songId: song.id });
-            try { await notifyAdjustmentRequested(song); } catch (_) {}
+
+            const songRes = await pool.query('SELECT * FROM songs WHERE approval_token=$1', [token]);
+            if (songRes.rows.length === 0) return sendJson(res, 404, { error: "Pedido não encontrado." });
+            const song = rowToSong(songRes.rows[0]);
+            const history = Array.isArray(song.adjustmentHistory) ? song.adjustmentHistory : [];
+            history.push({ description: description.trim(), requestedAt: new Date().toISOString() });
+
+            const upd = await pool.query(`
+                UPDATE songs SET status='adjustment_requested', adjustment_history=$1::jsonb
+                WHERE approval_token=$2 RETURNING *`,
+                [JSON.stringify(history), token]
+            );
+            const updSong = rowToSong(upd.rows[0]);
+            logEvent('adjustment_requested', { songId: updSong.id });
+            try { await notifyAdjustmentRequested(updSong); } catch (_) {}
             return sendJson(res, 200, { success: true, status: 'adjustment_requested' });
         } catch (e) {
             return sendJson(res, 500, { error: e.message });
@@ -835,50 +763,58 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && pathname.startsWith('/api/preview/')) {
         const token = pathname.replace('/api/preview/', '');
         if (!token) return sendJson(res, 400, { error: "Token obrigatório." });
-        const db = readDb();
-        const song = db.songs.find(s => s.approvalToken === token);
-        if (!song) return sendJson(res, 404, { error: "Not found." });
-        const previewPath = path.join(getOrderDir(song.id), 'preview.mp3');
-        if (fs.existsSync(previewPath)) {
-            const stat = fs.statSync(previewPath);
-            res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Content-Length': stat.size, 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-cache' });
-            fs.createReadStream(previewPath).pipe(res);
-            return;
+        try {
+            const result = await pool.query('SELECT id, audio_url FROM songs WHERE approval_token=$1', [token]);
+            if (result.rows.length === 0) return sendJson(res, 404, { error: "Not found." });
+            const row = result.rows[0];
+            const previewPath = path.join(getOrderDir(row.id), 'preview.mp3');
+            if (fs.existsSync(previewPath)) {
+                const stat = fs.statSync(previewPath);
+                res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Content-Length': stat.size, 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-cache' });
+                fs.createReadStream(previewPath).pipe(res);
+                return;
+            }
+            // Fallback: redirect to original Suno URL
+            if (row.audio_url && row.audio_url.startsWith('http')) {
+                res.writeHead(302, { Location: row.audio_url });
+                res.end();
+                return;
+            }
+            return sendJson(res, 404, { error: "Prévia não disponível." });
+        } catch (e) {
+            return sendJson(res, 500, { error: e.message });
         }
-        // Fallback: redirect to original Suno URL
-        if (song.audioUrl && song.audioUrl.startsWith('http')) {
-            res.writeHead(302, { Location: song.audioUrl });
-            res.end();
-            return;
-        }
-        return sendJson(res, 404, { error: "Prévia não disponível." });
     }
 
     // 14. Download full musica.mp3 by token (only if paid or delivered)
     if (req.method === 'GET' && pathname.startsWith('/api/download/')) {
         const token = pathname.replace('/api/download/', '');
         if (!token) return sendJson(res, 400, { error: "Token obrigatório." });
-        const db = readDb();
-        const song = db.songs.find(s => s.approvalToken === token);
-        if (!song) return sendJson(res, 404, { error: "Not found." });
-        if (!['paid', 'delivered'].includes(song.status)) {
-            return sendJson(res, 403, { error: "Música ainda não disponível para download." });
+        try {
+            const result = await pool.query('SELECT * FROM songs WHERE approval_token=$1', [token]);
+            if (result.rows.length === 0) return sendJson(res, 404, { error: "Not found." });
+            const song = rowToSong(result.rows[0]);
+            if (!['paid', 'delivered'].includes(song.status)) {
+                return sendJson(res, 403, { error: "Música ainda não disponível para download." });
+            }
+            const musicaPath = path.join(getOrderDir(song.id), 'musica.mp3');
+            if (fs.existsSync(musicaPath)) {
+                const safeTitle = (song.title || 'musica').replace(/[^\w\sÀ-ÿ-]/g, '').trim().replace(/\s+/g, '_');
+                const stat = fs.statSync(musicaPath);
+                res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Content-Length': stat.size, 'Content-Disposition': `attachment; filename="${safeTitle}.mp3"`, 'Accept-Ranges': 'bytes' });
+                fs.createReadStream(musicaPath).pipe(res);
+                return;
+            }
+            // Fallback to original URL
+            if (song.audioUrl && song.audioUrl.startsWith('http')) {
+                res.writeHead(302, { Location: song.audioUrl });
+                res.end();
+                return;
+            }
+            return sendJson(res, 404, { error: "Arquivo não encontrado." });
+        } catch (e) {
+            return sendJson(res, 500, { error: e.message });
         }
-        const musicaPath = path.join(getOrderDir(song.id), 'musica.mp3');
-        if (fs.existsSync(musicaPath)) {
-            const safeTitle = (song.title || 'musica').replace(/[^\w\sÀ-ÿ-]/g, '').trim().replace(/\s+/g, '_');
-            const stat = fs.statSync(musicaPath);
-            res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Content-Length': stat.size, 'Content-Disposition': `attachment; filename="${safeTitle}.mp3"`, 'Accept-Ranges': 'bytes' });
-            fs.createReadStream(musicaPath).pipe(res);
-            return;
-        }
-        // Fallback to original URL
-        if (song.audioUrl && song.audioUrl.startsWith('http')) {
-            res.writeHead(302, { Location: song.audioUrl });
-            res.end();
-            return;
-        }
-        return sendJson(res, 404, { error: "Arquivo não encontrado." });
     }
 
     // 15. Admin: upload MP3 direto do computador
@@ -889,13 +825,17 @@ const server = http.createServer(async (req, res) => {
             const songId = parseInt(req.headers['x-song-id']);
             if (!songId) return sendJson(res, 400, { error: 'Header X-Song-Id obrigatório.' });
 
-            const db = readDb();
-            const songIndex = db.songs.findIndex(s => s.id === songId);
-            if (songIndex === -1) return sendJson(res, 404, { error: 'Song not found.' });
+            const songRes = await pool.query('SELECT * FROM songs WHERE id=$1', [songId]);
+            if (songRes.rows.length === 0) return sendJson(res, 404, { error: 'Song not found.' });
 
-            const song = db.songs[songIndex];
-            if (!song.approvalToken) song.approvalToken = generateApprovalToken();
-            if (!Array.isArray(song.adjustmentHistory)) song.adjustmentHistory = [];
+            let song = rowToSong(songRes.rows[0]);
+
+            // Ensure approvalToken exists
+            if (!song.approvalToken) {
+                const newToken = generateApprovalToken();
+                await pool.query('UPDATE songs SET approval_token=$1 WHERE id=$2', [newToken, song.id]);
+                song.approvalToken = newToken;
+            }
 
             const buffer = await getRawBody(req);
             if (buffer.length < 1024) return sendJson(res, 400, { error: 'Arquivo muito pequeno ou inválido.' });
@@ -917,15 +857,18 @@ const server = http.createServer(async (req, res) => {
                 logEvent('ffmpeg_error', { songId: song.id, error: ffmpegErr.message });
             }
 
-            song.audioUrl = `/api/download/${song.approvalToken}`;
-            song.status = 'preview_ready';
-            song.isPurchased = false;
-            song.previewUrl = previewGenerated
+            const audioRelPath = `/api/download/${song.approvalToken}`;
+            const previewRelPath = previewGenerated
                 ? `/api/preview/${song.approvalToken}`
                 : `/api/download/${song.approvalToken}`;
 
-            db.songs[songIndex] = song;
-            writeDb(db);
+            await pool.query(`
+                UPDATE songs SET audio_url=$1, preview_url=$2, status='preview_ready', is_purchased=false
+                WHERE id=$3`,
+                [audioRelPath, previewRelPath, song.id]
+            );
+            const upd = await pool.query('SELECT * FROM songs WHERE id=$1', [song.id]);
+            song = rowToSong(upd.rows[0]);
 
             const baseUrl = getProductionUrl();
             const approvalUrl = `${baseUrl}/pedido/${song.approvalToken}`;
@@ -934,7 +877,7 @@ const server = http.createServer(async (req, res) => {
 
             logEvent('preview_ready', { songId: song.id, previewGenerated, source: 'upload' });
 
-            return sendJson(res, 200, { success: true, song: db.songs[songIndex], previewGenerated, approvalUrl });
+            return sendJson(res, 200, { success: true, song, previewGenerated, approvalUrl });
         } catch (e) {
             console.error('Upload error:', e.message);
             return sendJson(res, 500, { error: e.message });
@@ -944,14 +887,18 @@ const server = http.createServer(async (req, res) => {
     // 16. Create PIX payment via Asaas
     if (req.method === 'POST' && pathname === '/api/payment/create') {
         try {
-            const { token } = await getJsonBody(req);
+            const { token, cpf } = await getJsonBody(req);
             if (!token) return sendJson(res, 400, { error: "Token obrigatório." });
 
-            const db = readDb();
-            const idx = db.songs.findIndex(s => s.approvalToken === token);
-            if (idx === -1) return sendJson(res, 404, { error: "Pedido não encontrado." });
+            const cpfDigits = (cpf || '').replace(/\D/g, '');
+            if (!cpfDigits || cpfDigits.length !== 11) {
+                return sendJson(res, 400, { error: "CPF inválido. Informe os 11 dígitos." });
+            }
 
-            const song = db.songs[idx];
+            const songRes = await pool.query('SELECT * FROM songs WHERE approval_token=$1', [token]);
+            if (songRes.rows.length === 0) return sendJson(res, 404, { error: "Pedido não encontrado." });
+
+            let song = rowToSong(songRes.rows[0]);
             if (song.status !== 'awaiting_payment') {
                 return sendJson(res, 400, { error: `Status atual não permite pagamento: ${song.status}` });
             }
@@ -959,6 +906,10 @@ const server = http.createServer(async (req, res) => {
             if (!process.env.ASAAS_API_KEY) {
                 return sendJson(res, 500, { error: "Gateway de pagamento não configurado." });
             }
+
+            // Salvar CPF
+            await pool.query('UPDATE songs SET customer_cpf=$1 WHERE id=$2', [cpfDigits, song.id]);
+            song.customerCpf = cpfDigits;
 
             const price = parseFloat(process.env.MAGIC_MUSIC_PRICE || '49.90');
 
@@ -979,10 +930,8 @@ const server = http.createServer(async (req, res) => {
 
             const qrCode = await asaasRequest('GET', `/payments/${payment.id}/pixQrCode`);
 
-            song.pixTransactionId = payment.id;
-            song.paymentProvider = 'asaas';
-            db.songs[idx] = song;
-            writeDb(db);
+            await pool.query(`UPDATE songs SET pix_transaction_id=$1, payment_provider='asaas' WHERE id=$2`,
+                [payment.id, song.id]);
             logEvent('payment_created', { songId: song.id, paymentId: payment.id });
 
             return sendJson(res, 200, {
@@ -1002,7 +951,7 @@ const server = http.createServer(async (req, res) => {
         }
     }
 
-    // 16. Asaas PIX webhook (PAYMENT_RECEIVED / PAYMENT_CONFIRMED)
+    // 17. Asaas PIX webhook (PAYMENT_RECEIVED / PAYMENT_CONFIRMED)
     if (req.method === 'POST' && pathname === '/api/payment/webhook') {
         try {
             const webhookToken = process.env.ASAAS_WEBHOOK_TOKEN;
@@ -1027,26 +976,26 @@ const server = http.createServer(async (req, res) => {
                 return sendJson(res, 400, { error: 'payment.id ausente no payload' });
             }
 
-            const db = readDb();
-            const idx = db.songs.findIndex(s => s.pixTransactionId === payment.id);
-            if (idx === -1) {
+            // Verifica se já foi processado
+            const checkRes = await pool.query('SELECT * FROM songs WHERE pix_transaction_id=$1', [payment.id]);
+            if (checkRes.rows.length === 0) {
                 logEvent('webhook_song_not_found', { paymentId: payment.id });
                 return sendJson(res, 200, { ok: true, notFound: true });
             }
-
-            const song = db.songs[idx];
-
-            if (['paid', 'delivered'].includes(song.status)) {
+            const existing = rowToSong(checkRes.rows[0]);
+            if (['paid', 'delivered'].includes(existing.status)) {
                 return sendJson(res, 200, { ok: true, alreadyProcessed: true });
             }
 
-            const now = new Date().toISOString();
-            song.paymentStatus = 'paid';
-            song.paidAt = now;
-            song.status = 'delivered';
-            song.deliveredAt = now;
-            db.songs[idx] = song;
-            writeDb(db);
+            await pool.query(`
+                UPDATE songs SET status='delivered', paid_at=NOW(), delivered_at=NOW(),
+                    payment_status='paid'
+                WHERE pix_transaction_id=$1`,
+                [payment.id]
+            );
+
+            const songRes = await pool.query('SELECT * FROM songs WHERE pix_transaction_id=$1', [payment.id]);
+            const song = rowToSong(songRes.rows[0]);
 
             logEvent('payment_confirmed', { songId: song.id, paymentId: payment.id });
 
@@ -1074,7 +1023,7 @@ const server = http.createServer(async (req, res) => {
 
     // Default to index.html if request is root
     let filePath = pathname === '/' ? './index.html' : '.' + pathname;
-    
+
     // Prevent directory traversal securely
     const safePath = path.resolve(__dirname, filePath);
     if (!safePath.startsWith(__dirname)) {

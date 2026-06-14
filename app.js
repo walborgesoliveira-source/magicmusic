@@ -113,30 +113,12 @@ const AppDB = {
     },
     saveSongs(songs) {
         localStorage.setItem("magic_music_songs", JSON.stringify(songs));
-    },
-    getCredits() {
-        const local = localStorage.getItem("magic_music_credits");
-        if (local === null) {
-            localStorage.setItem("magic_music_credits", "3");
-            return 3;
-        }
-        return parseInt(local, 10);
-    },
-    saveCredits(credits) {
-        localStorage.setItem("magic_music_credits", credits.toString());
     }
 };
 
 // Application State
 let songs = [];
-let credits = 3;
 let activeTab = "create";
-let currentPlayingSong = null;
-let isPlaying = false;
-let playbackProgress = 0; // fraction 0.0 to 1.0
-let activeLyricLineIndex = 0;
-let playbackInterval = null;
-const html5Audio = new Audio();
 let adminModeActive = false;
 
 let wizardStep = 1;
@@ -144,370 +126,15 @@ let selectedOccasion = "Aniversário";
 let selectedStyle = "Pop BR";
 let wizardDraftSong = null;
 
-let currentQuizQuestion = null;
-let selectedPackAmount = null;
 let adminSessionPassword = "";
 let clientSongs = [];
 let clientLookupPerformed = false;
 
-// Web Audio API Synthesizer Context
-let audioCtx = null;
-let masterGain = null;
-let analyser = null;
-let synthTimer = null;
-let synthBeatIndex = 0;
-
-// Initialize Web Audio Context on Interaction
-function initAudioContext() {
-    if (audioCtx) return;
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    masterGain = audioCtx.createGain();
-    masterGain.gain.setValueAtTime(0.25, audioCtx.currentTime); // Safe volume
-    analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 64; // Small size for visualizer bands
-    
-    masterGain.connect(analyser);
-    analyser.connect(audioCtx.destination);
-}
-
-// Synthesize backing drum kick sound
-function playSynthKick(time) {
-    if (!audioCtx) return;
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.connect(gain);
-    gain.connect(masterGain);
-    
-    osc.frequency.setValueAtTime(150, time);
-    osc.frequency.exponentialRampToValueAtTime(0.01, time + 0.3);
-    
-    gain.gain.setValueAtTime(1.0, time);
-    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.3);
-    
-    osc.start(time);
-    osc.stop(time + 0.3);
-}
-
-// Synthesize backing snare noise burst
-function playSynthSnare(time) {
-    if (!audioCtx) return;
-    // Create White Noise buffer
-    const bufferSize = audioCtx.sampleRate * 0.2; // 0.2s duration
-    const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) {
-        data[i] = Math.random() * 2 - 1;
-    }
-    
-    const noise = audioCtx.createBufferSource();
-    noise.buffer = buffer;
-    
-    const filter = audioCtx.createBiquadFilter();
-    filter.type = "highpass";
-    filter.frequency.setValueAtTime(1000, time);
-    
-    const gain = audioCtx.createGain();
-    gain.gain.setValueAtTime(0.4, time);
-    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.2);
-    
-    noise.connect(filter);
-    filter.connect(gain);
-    gain.connect(masterGain);
-    
-    noise.start(time);
-    noise.stop(time + 0.25);
-}
-
-// Synthesize acoustic shaker
-function playSynthShaker(time) {
-    if (!audioCtx) return;
-    const bufferSize = audioCtx.sampleRate * 0.05;
-    const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) {
-        data[i] = Math.random() * 2 - 1;
-    }
-    const noise = audioCtx.createBufferSource();
-    noise.buffer = buffer;
-    
-    const filter = audioCtx.createBiquadFilter();
-    filter.type = "bandpass";
-    filter.frequency.setValueAtTime(6000, time);
-    
-    const gain = audioCtx.createGain();
-    gain.gain.setValueAtTime(0.05, time);
-    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.05);
-    
-    noise.connect(filter);
-    filter.connect(gain);
-    gain.connect(masterGain);
-    noise.start(time);
-}
-
-// Synthesize chords based on style
-function playSynthChord(time, style, chordIndex) {
-    if (!audioCtx) return;
-    
-    // Choose chord frequencies
-    let freqs = [];
-    let oscType = "sine";
-    let vol = 0.12;
-    let duration = 0.8;
-    let isArpeggio = false;
-    
-    switch (style) {
-        case "Pop BR":
-            oscType = "sine";
-            duration = 1.6;
-            switch (chordIndex % 4) {
-                case 0: freqs = [261.63, 329.63, 392.00]; break; // C
-                case 1: freqs = [196.00, 246.94, 293.66]; break; // G
-                case 2: freqs = [220.00, 261.63, 329.63]; break; // Am
-                default: freqs = [174.61, 220.00, 261.63]; break; // F
-            }
-            break;
-        case "Trap / Rap":
-            oscType = "triangle"; // Deep sub bass feel
-            duration = 1.6;
-            vol = 0.22;
-            switch (chordIndex % 2) {
-                case 0: freqs = [110.00, 130.81, 164.81]; break; // Am Deep
-                default: freqs = [73.42, 87.31, 110.00]; break; // Dm Deep
-            }
-            break;
-        case "Rock":
-            oscType = "sawtooth"; // Power chords guitar distorted style
-            duration = 0.8;
-            vol = 0.08;
-            switch (chordIndex % 4) {
-                case 0: freqs = [130.81, 196.00]; break; // C5
-                case 1: freqs = [98.00, 146.83]; break; // G5
-                case 2: freqs = [110.00, 164.81]; break; // A5
-                default: freqs = [87.31, 130.81]; break; // F5
-            }
-            break;
-        case "Eletrônica":
-            oscType = "sawtooth";
-            duration = 0.4; // rapid pulses
-            vol = 0.06;
-            switch (chordIndex % 2) {
-                case 0: freqs = [164.81, 246.94, 329.63]; break; // E
-                default: freqs = [220.00, 330.00, 440.00]; break; // A
-            }
-            break;
-        case "Acústico / MPB":
-            oscType = "triangle"; // Plucky acoustic guitar chords
-            duration = 1.0;
-            vol = 0.16;
-            isArpeggio = true; // Pluck arpeggios
-            switch (chordIndex % 4) {
-                case 0: freqs = [261.63, 329.63, 392.00, 493.88]; break; // Cmaj7
-                case 1: freqs = [293.66, 349.23, 440.00, 587.33]; break; // Dm7
-                case 2: freqs = [196.00, 246.94, 293.66, 349.23]; break; // G7
-                default: freqs = [174.61, 220.00, 261.63, 329.63]; break; // Fmaj7
-            }
-            break;
-        default: // Sertanejo
-            oscType = "sine";
-            duration = 1.2;
-            switch (chordIndex % 2) {
-                case 0: freqs = [196.00, 246.94, 293.66]; break; // G
-                default: freqs = [146.83, 184.99, 220.00]; break; // D
-            }
-            break;
-    }
-    
-    // Schedule the oscillators
-    freqs.forEach((f, idx) => {
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.type = oscType;
-        osc.frequency.setValueAtTime(f, time + (isArpeggio ? idx * 0.08 : 0));
-        
-        gain.gain.setValueAtTime(0.01, time);
-        gain.gain.linearRampToValueAtTime(vol, time + 0.05 + (isArpeggio ? idx * 0.08 : 0));
-        gain.gain.exponentialRampToValueAtTime(0.001, time + duration);
-        
-        osc.connect(gain);
-        gain.connect(masterGain);
-        
-        osc.start(time);
-        osc.stop(time + duration + 0.1);
-    });
-}
-
-// Start Synthesizer scheduler loops
-function startBackingSynthesizer(style) {
-    if (audioCtx && audioCtx.state === "suspended") {
-        audioCtx.resume();
-    }
-    
-    let tempoBpm = 110;
-    if (style === "Trap / Rap") tempoBpm = 135;
-    if (style === "Eletrônica") tempoBpm = 125;
-    if (style === "Acústico / MPB") tempoBpm = 88;
-    
-    const beatInterval = 60 / tempoBpm; // duration of one beat in seconds
-    synthBeatIndex = 0;
-    
-    // Scheduler clock ticking every beat
-    function scheduleNextBeat() {
-        const now = audioCtx.currentTime;
-        const nextTime = now + beatInterval;
-        const chordIdx = Math.floor(synthBeatIndex / 4);
-        
-        // 1. Play drums depending on rhythm style
-        if (style === "Trap / Rap") {
-            // Kick on 1 and 3, Snare on 2 and 4, rapid hats
-            if (synthBeatIndex % 4 === 0 || synthBeatIndex % 4 === 2) playSynthKick(nextTime);
-            if (synthBeatIndex % 4 === 1 || synthBeatIndex % 4 === 3) playSynthSnare(nextTime);
-            // Hihats
-            playSynthShaker(nextTime);
-            playSynthShaker(nextTime + beatInterval / 2);
-        } else if (style === "Eletrônica") {
-            // Four on the floor kick (every beat)
-            playSynthKick(nextTime);
-            if (synthBeatIndex % 2 === 1) playSynthSnare(nextTime);
-            playSynthShaker(nextTime + beatInterval / 2);
-        } else if (style === "Acústico / MPB") {
-            // Soft shakers only
-            if (synthBeatIndex % 2 === 0) playSynthShaker(nextTime);
-            playSynthShaker(nextTime + beatInterval / 2);
-        } else if (style === "Rock") {
-            // Power beat
-            if (synthBeatIndex % 2 === 0) playSynthKick(nextTime);
-            else playSynthSnare(nextTime);
-        } else { // Pop & Sertanejo
-            if (synthBeatIndex % 4 === 0 || synthBeatIndex % 4 === 2) playSynthKick(nextTime);
-            if (synthBeatIndex % 4 === 2) playSynthSnare(nextTime);
-        }
-        
-        // 2. Play instrumental chords
-        if (style === "Eletrônica") {
-            // Pulse chord on every beat
-            playSynthChord(nextTime, style, chordIdx);
-        } else if (synthBeatIndex % 4 === 0) {
-            // Play longer chords every 4 beats
-            playSynthChord(nextTime, style, chordIdx);
-        }
-        
-        synthBeatIndex++;
-        synthTimer = setTimeout(scheduleNextBeat, beatInterval * 1000);
-    }
-    
-    scheduleNextBeat();
-}
-
-function stopBackingSynthesizer() {
-    if (synthTimer) {
-        clearTimeout(synthTimer);
-        synthTimer = null;
-    }
-}
-
-// Web Speech API Vocal Singer
-function speakLyricVocals(text, style) {
-    if (!('speechSynthesis' in window)) return;
-    
-    window.speechSynthesis.cancel(); // Cancel any active speakings immediately
-    
-    if (!text || text.trim() === "" || text.startsWith("[")) return;
-    
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = "pt-BR";
-    
-    // Customize pitch/speed rates according to music styles
-    switch (style) {
-        case "Trap / Rap":
-            utterance.pitch = 1.05;
-            utterance.rate = 1.22;
-            break;
-        case "Eletrônica":
-            utterance.pitch = 1.30;
-            utterance.rate = 1.10;
-            break;
-        case "Acústico / MPB":
-            utterance.pitch = 1.08;
-            utterance.rate = 0.85;
-            break;
-        case "Sertanejo":
-            utterance.pitch = 1.20;
-            utterance.rate = 0.95;
-            break;
-        case "Rock":
-            utterance.pitch = 1.18;
-            utterance.rate = 1.00;
-            break;
-        default: // Pop BR, others
-            utterance.pitch = 1.15;
-            utterance.rate = 1.00;
-            break;
-    }
-    
-    window.speechSynthesis.speak(utterance);
-}
-
-function stopLyricVocals() {
-    if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-    }
-}
-
-// HTML5 Canvas Bouncing Equalizer Renderer
-function drawVisualizerBars() {
-    const canvas = document.getElementById("visualizer-canvas");
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    const width = canvas.width;
-    const height = canvas.height;
-    
-    // Clear canvas
-    ctx.clearRect(0, 0, width, height);
-    
-    const barWidth = 4;
-    const gap = 3;
-    const barsCount = Math.floor(width / (barWidth + gap));
-    
-    let freqData = new Uint8Array(barsCount);
-    if (isPlaying && analyser) {
-        analyser.getByteFrequencyData(freqData);
-    }
-    
-    const timeNow = Date.now() * 0.005;
-    
-    for (let i = 0; i < barsCount; i++) {
-        let val = 0;
-        if (isPlaying && analyser) {
-            // Read frequency value
-            val = freqData[i] / 255;
-        } else {
-            // Draw slow floating idle wave
-            val = (Math.sin(i * 0.35 + timeNow) * 0.45 + 0.55) * 0.08;
-        }
-        
-        // Compute bar height
-        const barHeight = height * Math.max(val * 1.5, 0.08);
-        const x = i * (barWidth + gap);
-        const y = height - barHeight;
-        
-        // Choose theme colors depending on index (alternating Pink and Indigo)
-        const baseColor = i % 2 === 0 ? "rgba(244, 63, 94," : "rgba(99, 102, 241,";
-        
-        // 1. Draw glowing background shadow
-        ctx.fillStyle = `${baseColor} 0.18)`;
-        ctx.fillRect(x - 2, y - 1, barWidth + 4, barHeight + 1);
-        
-        // 2. Draw vertical gradient foreground bar
-        const gradient = ctx.createLinearGradient(x, y, x, height);
-        gradient.addColorStop(0, "#f43f5e"); // Pink top
-        gradient.addColorStop(1, "#6366f1"); // Indigo bottom
-        
-        ctx.fillStyle = gradient;
-        ctx.fillRect(x, y, barWidth, barHeight);
-    }
-    
-    requestAnimationFrame(drawVisualizerBars);
-}
+let approvalToken = null;
+let approvalAudioEl = null;
+let approvalPlaying = false;
+let paymentToken = null;
+let pixCopyPasteCode = '';
 
 // View-controller and Navigation functions
 function switchTab(tabId) {
@@ -529,9 +156,7 @@ function switchTab(tabId) {
         el.classList.toggle("active", el.id === `tab-${tabId}`);
     });
     
-    if (tabId === "player") {
-        renderPlayerScreen();
-    } else if (tabId === "library") {
+    if (tabId === "library") {
         renderLibraryScreen();
     } else if (tabId === "client") {
         renderClientArea();
@@ -543,53 +168,11 @@ function switchTab(tabId) {
 // App Initialization
 window.addEventListener("DOMContentLoaded", async () => {
     songs = AppDB.getSongs();
-    credits = AppDB.getCredits();
-    
+
     // Render initial page elements
-    updateCreditsUI();
     renderLibraryScreen();
     setupWizardListeners();
-    setupPixClicker();
     setupClientLookupListener();
-    
-    // Start visualizer animation loop
-    drawVisualizerBars();
-
-    // Setup Progress slider listener
-    const progressSlider = document.getElementById("player-progress-bar");
-    if (progressSlider) {
-        progressSlider.addEventListener("input", (e) => {
-            if (!currentPlayingSong) return;
-            const pct = parseInt(e.target.value) / 100;
-            const duration = currentPlayingSong.audioUrl ? html5Audio.duration : currentPlayingSong.durationSeconds;
-            if (!duration || isNaN(duration)) return;
-            let targetTime = pct * duration;
-            
-            // 1-minute preview lock
-            if (!currentPlayingSong.isPurchased && targetTime >= 60) {
-                targetTime = 60;
-                e.target.value = Math.floor((60 / duration) * 100);
-                document.getElementById("player-progress-fill").style.width = `${e.target.value}%`;
-                pauseSong();
-                openSongPurchaseCheckout(currentPlayingSong);
-                return;
-            }
-            
-            if (currentPlayingSong.audioUrl) {
-                html5Audio.currentTime = targetTime;
-                playbackProgress = pct;
-                document.getElementById("player-time-elapsed").innerText = formatTime(Math.floor(targetTime));
-            } else {
-                playbackProgress = pct;
-                const cleanLines = currentPlayingSong.originalLyrics.split("\n")
-                    .filter(l => l.trim() !== "" && !l.trim().startsWith("["));
-                activeLyricLineIndex = Math.min(Math.floor(pct * cleanLines.length), cleanLines.length - 1);
-                renderPlayerScreen();
-            }
-        });
-    }
-
-    setupCpfMask();
 
     // Sync with backend server
     await syncSongsWithServer();
@@ -602,7 +185,6 @@ async function syncSongsWithServer() {
             const serverSongs = await response.json();
             if (Array.isArray(serverSongs) && serverSongs.length > 0) {
                 songs = serverSongs;
-                AppDB.saveSongs(songs);
                 renderLibraryScreen();
             }
         }
@@ -640,29 +222,14 @@ function setupWizardListeners() {
     });
 }
 
-function updateCreditsUI() {
-    document.getElementById("credits-count").innerText = credits;
-    document.getElementById("shop-credits-count").innerText = credits;
-    document.getElementById("nav-credits-text").innerText = `Crédito: ${credits}`;
-}
-
 function setupClientLookupListener() {
     const input = document.getElementById("client-contact");
     if (!input) return;
-    input.addEventListener("keydown", (event) => {
-        if (event.key === "Enter") lookupClientSongs();
-    });
-}
 
-function setupCpfMask() {
-    const cpfInput = document.getElementById("customer-cpf");
-    if (!cpfInput) return;
-    cpfInput.addEventListener("input", () => {
-        let v = cpfInput.value.replace(/\D/g, '').substring(0, 11);
-        if (v.length > 9) v = v.replace(/(\d{3})(\d{3})(\d{3})(\d{1,2})/, '$1.$2.$3-$4');
-        else if (v.length > 6) v = v.replace(/(\d{3})(\d{3})(\d{1,3})/, '$1.$2.$3');
-        else if (v.length > 3) v = v.replace(/(\d{3})(\d{1,3})/, '$1.$2');
-        cpfInput.value = v;
+    input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+            lookupClientSongs();
+        }
     });
 }
 
@@ -694,7 +261,6 @@ function resetWizard() {
     document.getElementById("key-stories").value = "";
     document.getElementById("customer-name").value = "";
     document.getElementById("customer-whatsapp").value = "";
-    document.getElementById("customer-cpf").value = "";
     document.getElementById("customer-email").value = "";
     document.getElementById("customer-notes").value = "";
     document.querySelectorAll("#vibe-chips .chip").forEach(el => {
@@ -750,7 +316,6 @@ async function draftLyricsWithAI() {
         wizardDraftSong.sunoPrompt = `${selectedStyle}, portuguese vocals, personalized song`;
         wizardDraftSong.status = "pending_audio";
         wizardDraftSong.audioUrl = null;
-        wizardDraftSong.isPurchased = false;
         wizardDraftSong.id = songs.length > 0 ? Math.max(...songs.map(s => s.id)) + 1 : 1;
     }
     
@@ -771,16 +336,11 @@ async function finalizeProduction() {
     const finalLyrics = document.getElementById("draft-lyrics").value;
     const customerName = document.getElementById("customer-name").value.trim();
     const customerWhatsapp = document.getElementById("customer-whatsapp").value.trim();
-    const customerCpf = document.getElementById("customer-cpf").value.replace(/\D/g, '');
     const customerEmail = document.getElementById("customer-email").value.trim();
     const customerNotes = document.getElementById("customer-notes").value.trim();
 
     if (!customerWhatsapp) {
         alert("Informe o WhatsApp para a equipe entregar o MP3 final.");
-        return;
-    }
-    if (!customerCpf || customerCpf.length !== 11) {
-        alert("Informe o CPF completo (obrigatório para o pagamento PIX).");
         return;
     }
     
@@ -789,7 +349,6 @@ async function finalizeProduction() {
     wizardDraftSong.originalLyrics = finalLyrics;
     wizardDraftSong.customerName = customerName;
     wizardDraftSong.customerWhatsapp = customerWhatsapp;
-    wizardDraftSong.customerCpf = customerCpf;
     wizardDraftSong.customerEmail = customerEmail;
     wizardDraftSong.customerNotes = customerNotes;
     
@@ -811,7 +370,6 @@ async function finalizeProduction() {
                     originalLyrics: finalLyrics,
                     customerName,
                     customerWhatsapp,
-                    customerCpf,
                     customerEmail,
                     customerNotes
                 })
@@ -825,12 +383,9 @@ async function finalizeProduction() {
             await syncSongsWithServer();
             
             closeModal("production-modal");
-            alert("Sua letra foi criada! Nossa equipe técnica produzirá o áudio no Suno AI. Acompanhe na biblioteca!");
-            
-            // Auto play the new song (will show pending state)
-            const matchedSong = songs.find(s => s.id === wizardDraftSong.id) || wizardDraftSong;
-            selectSong(matchedSong);
+            alert("Pedido enviado! Nossa equipe produzirá o áudio e você receberá a prévia para aprovação.");
             resetWizard();
+            switchTab("library");
         } catch (e) {
             console.error("Error finalizing server production:", e);
             closeModal("production-modal");
@@ -838,8 +393,8 @@ async function finalizeProduction() {
             // fallback save
             songs.push(wizardDraftSong);
             AppDB.saveSongs(songs);
-            selectSong(wizardDraftSong);
             resetWizard();
+            switchTab("library");
         }
     } else {
         document.getElementById("production-status-text").innerText = "Registrando pedido de produção...";
@@ -857,16 +412,16 @@ async function finalizeProduction() {
             await syncSongsWithServer();
             closeModal("production-modal");
             alert("Letra criada e enviada para produção. O áudio será liberado quando o MP3 final estiver pronto.");
-            selectSong(savedSong);
             resetWizard();
+            switchTab("library");
         } catch (e) {
             console.error("Error registering production request:", e);
             songs.push(wizardDraftSong);
             AppDB.saveSongs(songs);
             closeModal("production-modal");
             alert("Pedido salvo localmente, mas não foi possível enviar aviso de produção agora.");
-            selectSong(wizardDraftSong);
             resetWizard();
+            switchTab("library");
         }
     }
 }
@@ -907,12 +462,10 @@ function renderLibraryScreen() {
     
     container.innerHTML = "";
     filtered.forEach(song => {
-        const isCurPlaying = currentPlayingSong && currentPlayingSong.id === song.id;
         const color = song.coverColorHex.replace("0xFF", "#");
-        
+
         const card = document.createElement("div");
-        card.className = `song-card ${isCurPlaying ? "playing" : ""}`;
-        card.onclick = () => selectSong(song);
+        card.className = `song-card`;
         
         card.innerHTML = `
             <div class="song-cover-box" style="background-color: ${color}">
@@ -951,281 +504,23 @@ function renderLibraryScreen() {
     });
 }
 
-// Selected Song handler
-function selectSong(song) {
-    currentPlayingSong = song;
-    playbackProgress = 0;
-    activeLyricLineIndex = 0;
-    pauseSong();
-    switchTab("player");
-}
-
 function toggleFavorite(id) {
     songs = songs.map(s => {
         if (s.id === id) {
             const nextFav = !s.isFavorite;
-            if (currentPlayingSong && currentPlayingSong.id === id) {
-                currentPlayingSong.isFavorite = nextFav;
-            }
             return { ...s, isFavorite: nextFav };
         }
         return s;
     });
     AppDB.saveSongs(songs);
     renderLibraryScreen();
-    if (activeTab === "player") renderPlayerScreen();
 }
 
 function deleteSong(id) {
     if (confirm("Tem certeza que deseja apagar essa música do seu acervo?")) {
         songs = songs.filter(s => s.id !== id);
         AppDB.saveSongs(songs);
-        
-        if (currentPlayingSong && currentPlayingSong.id === id) {
-            currentPlayingSong = null;
-            pauseSong();
-            document.getElementById("mini-player").style.display = "none";
-        }
         renderLibraryScreen();
-    }
-}
-
-// Player Screen Renderer
-function renderPlayerScreen() {
-    if (!currentPlayingSong) {
-        document.getElementById("lyrics-scroll-box").innerHTML = '<div class="no-lyrics">Selecione ou crie uma música no acervo!</div>';
-        document.getElementById("player-song-title").innerText = "Nenhuma faixa selecionada";
-        document.getElementById("player-song-artist").innerText = "Magic Music AI";
-        return;
-    }
-    
-    const song = currentPlayingSong;
-    const color = song.coverColorHex.replace("0xFF", "#");
-    
-    // Details
-    document.getElementById("player-song-genre").innerText = song.language.toUpperCase();
-    document.getElementById("player-song-style").innerText = `ESTILO: ${song.category.toUpperCase()}`;
-    document.getElementById("player-song-title").innerText = song.title;
-    document.getElementById("player-song-artist").innerText = song.artist;
-    document.getElementById("vinyl-center-color").style.backgroundColor = color;
-    
-    // Grooves color accent border
-    const vinylDisc = document.getElementById("vinyl-disc");
-    vinylDisc.style.borderColor = color;
-    
-    // Lyrics list drawing
-    const cleanLines = song.originalLyrics.split("\n")
-        .filter(l => l.trim() !== "" && !l.trim().startsWith("["));
-        
-    const scrollBox = document.getElementById("lyrics-scroll-box");
-    scrollBox.innerHTML = "";
-    
-    cleanLines.forEach((lineText, index) => {
-        const lineNode = document.createElement("div");
-        lineNode.className = `lyric-line ${index === activeLyricLineIndex ? "active" : ""}`;
-        lineNode.innerText = lineText;
-        if (index === activeLyricLineIndex) {
-            lineNode.style.color = color;
-            lineNode.style.borderLeft = `3px solid ${color}`;
-        } else {
-            lineNode.style.color = "";
-            lineNode.style.borderLeft = "";
-        }
-        
-        // Seek line on click
-        lineNode.onclick = () => seekToLine(index);
-        scrollBox.appendChild(lineNode);
-    });
-    
-    // Trigger scroll position sync
-    syncLyricsScroll();
-}
-
-function syncLyricsScroll() {
-    const scrollBox = document.getElementById("lyrics-scroll-box");
-    const activeNode = scrollBox.querySelector(".lyric-line.active");
-    if (activeNode) {
-        const topPos = activeNode.offsetTop;
-        scrollBox.scrollTop = topPos - scrollBox.clientHeight / 2 + activeNode.clientHeight / 2;
-    }
-}
-
-// Media Playback Controls
-function playSong() {
-    if (!currentPlayingSong) return;
-    
-    if (!currentPlayingSong.audioUrl || currentPlayingSong.status === "pending_audio") {
-        alert("Esta música ainda está na fila de produção. O player será liberado quando o MP3 final for anexado no painel admin.");
-        return;
-    }
-    
-    isPlaying = true;
-    document.getElementById("play-icon").innerText = "pause";
-    document.getElementById("vinyl-disc").classList.add("spinning");
-    
-    // Floating mini player display
-    const mini = document.getElementById("mini-player");
-    document.getElementById("mini-title").innerText = currentPlayingSong.title;
-    document.getElementById("mini-artist").innerText = currentPlayingSong.artist;
-    document.getElementById("mini-player-cover").style.backgroundColor = currentPlayingSong.coverColorHex.replace("0xFF", "#");
-    document.getElementById("mini-play-icon").innerText = "pause";
-    mini.style.display = "flex";
-    
-    const cleanLines = currentPlayingSong.originalLyrics.split("\n")
-        .filter(l => l.trim() !== "" && !l.trim().startsWith("["));
-
-    // Check if song has real Suno MP3 audio
-    if (currentPlayingSong.audioUrl) {
-        // Stop mock synths if running
-        stopBackingSynthesizer();
-        stopLyricVocals();
-        
-        // Setup HTML5 Audio
-        if (html5Audio.src !== currentPlayingSong.audioUrl) {
-            html5Audio.src = currentPlayingSong.audioUrl;
-        }
-        
-        html5Audio.play().catch(e => console.error("Error playing HTML5 audio:", e));
-        
-        clearInterval(playbackInterval);
-        const progressSlider = document.getElementById("player-progress-bar");
-        
-        playbackInterval = setInterval(() => {
-            if (!html5Audio.duration || isNaN(html5Audio.duration)) return;
-            
-            const duration = html5Audio.duration;
-            const currentTime = html5Audio.currentTime;
-            
-            // 1-minute preview restriction
-            if (!currentPlayingSong.isPurchased && currentTime >= 60) {
-                html5Audio.currentTime = 60;
-                pauseSong();
-                openSongPurchaseCheckout(currentPlayingSong);
-                return;
-            }
-            
-            playbackProgress = currentTime / duration;
-            if (playbackProgress >= 1.0) {
-                playbackProgress = 1.0;
-                pauseSong();
-            }
-            
-            const percent = Math.floor(playbackProgress * 100);
-            progressSlider.value = percent;
-            document.getElementById("player-progress-fill").style.width = `${percent}%`;
-            
-            document.getElementById("player-time-elapsed").innerText = formatTime(Math.floor(currentTime));
-            document.getElementById("player-time-total").innerText = formatTime(Math.floor(duration));
-            
-            // Lyrics auto advance
-            if (cleanLines.length > 0) {
-                const nextLineIdx = Math.floor(playbackProgress * cleanLines.length);
-                const constrainedIdx = Math.min(nextLineIdx, cleanLines.length - 1);
-                if (constrainedIdx !== activeLyricLineIndex) {
-                    activeLyricLineIndex = constrainedIdx;
-                    renderPlayerScreen();
-                }
-            }
-        }, 500);
-        
-    }
-}
-
-function pauseSong() {
-    isPlaying = false;
-    document.getElementById("play-icon").innerText = "play_arrow";
-    document.getElementById("vinyl-disc").classList.remove("spinning");
-    document.getElementById("mini-play-icon").innerText = "play_arrow";
-    
-    // Stop HTML5 Audio
-    html5Audio.pause();
-    
-    // Stop vocal & synthesis
-    stopLyricVocals();
-    stopBackingSynthesizer();
-    
-    clearInterval(playbackInterval);
-}
-
-function togglePlayPause() {
-    if (isPlaying) pauseSong(); else playSong();
-}
-
-function formatTime(secs) {
-    const m = Math.floor(secs / 60);
-    const s = secs % 60;
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-}
-
-function seekToLine(lineIndex) {
-    if (!currentPlayingSong) return;
-    const cleanLines = currentPlayingSong.originalLyrics.split("\n")
-        .filter(l => l.trim() !== "" && !l.trim().startsWith("["));
-    
-    if (cleanLines.length > 0) {
-        activeLyricLineIndex = lineIndex;
-        playbackProgress = lineIndex / cleanLines.length;
-        
-        // Update progress bar
-        const percent = Math.floor(playbackProgress * 100);
-        document.getElementById("player-progress-bar").value = percent;
-        document.getElementById("player-progress-fill").style.width = `${percent}%`;
-        
-        if (isPlaying) {
-            // Speak vocal
-            speakLyricVocals(cleanLines[activeLyricLineIndex], currentPlayingSong.category);
-        }
-        renderPlayerScreen();
-    }
-}
-
-function seekLineRelative(direction) {
-    if (!currentPlayingSong) return;
-    const cleanLines = currentPlayingSong.originalLyrics.split("\n")
-        .filter(l => l.trim() !== "" && !l.trim().startsWith("["));
-    const nextIdx = activeLyricLineIndex + direction;
-    if (nextIdx >= 0 && nextIdx < cleanLines.length) {
-        seekToLine(nextIdx);
-    }
-}
-
-// Share simulated trigger
-function shareSong() {
-    if (!currentPlayingSong) return;
-    const text = `Ouça a música personalizada "${currentPlayingSong.title}" no Magic Music!\n\nLetra:\n${currentPlayingSong.originalLyrics}`;
-    if (navigator.share) {
-        navigator.share({
-            title: currentPlayingSong.title,
-            text: text,
-            url: window.location.href
-        }).catch(err => console.log(err));
-    } else {
-        // Fallback copy
-        navigator.clipboard.writeText(text);
-        alert("Texto da música copiado para compartilhar!");
-    }
-}
-
-// Download simulated/real action
-function downloadSong() {
-    if (!currentPlayingSong) return;
-    
-    if (!currentPlayingSong.isPurchased) {
-        alert("O download está bloqueado na versão de prévia de 1 minuto. Adquira a música completa para liberá-lo!");
-        openSongPurchaseCheckout(currentPlayingSong);
-        return;
-    }
-    
-    if (currentPlayingSong.audioUrl) {
-        const link = document.createElement('a');
-        link.href = currentPlayingSong.audioUrl;
-        link.download = `${currentPlayingSong.title}.mp3`;
-        link.target = '_blank';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-    } else {
-        alert("O MP3 final ainda não está disponível. Anexe a URL do áudio pelo painel admin para liberar download.");
     }
 }
 
@@ -1236,148 +531,6 @@ function openModal(id) {
 
 function closeModal(id) {
     document.getElementById(id).classList.remove("active");
-}
-
-// Interactive Quiz Game Challenge
-function openQuizGame() {
-    if (!currentPlayingSong) {
-        alert("Selecione uma música primeiro!");
-        return;
-    }
-    generateQuizQuestion(currentPlayingSong);
-    openModal("quiz-modal");
-}
-
-function generateQuizQuestion(song) {
-    const cleanLines = song.originalLyrics.split("\n")
-        .filter(l => l.trim() !== "" && !l.trim().startsWith("["));
-        
-    if (cleanLines.length === 0) return;
-    
-    // Choose a random line
-    const randomLine = cleanLines[Math.floor(Math.random() * cleanLines.length)];
-    const words = randomLine.split(/\s+/).map(w => w.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "")).filter(w => w.length > 3);
-    
-    if (words.length === 0) {
-        // Fallback
-        currentQuizQuestion = null;
-        document.getElementById("quiz-blank-line").innerText = "Erro ao carregar desafio.";
-        return;
-    }
-    
-    const targetWord = words[Math.floor(Math.random() * words.length)];
-    const blankedLine = randomLine.replace(targetWord, "____");
-    
-    // Distractors
-    const distractors = new Set();
-    const allWords = cleanLines.flatMap(l => l.split(/\s+/)).map(w => w.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "")).filter(w => w.length > 3 && w.toLowerCase() !== targetWord.toLowerCase());
-    
-    // Shuffle and pick 3
-    allWords.sort(() => 0.5 - Math.random());
-    for (let w of allWords) {
-        if (distractors.size < 3) distractors.add(w);
-    }
-    
-    // Fallbacks if not enough distractors
-    const fallbacks = ["sorriso", "abraço", "canção", "alegria", "luz", "dia", "melodia", "parabéns"];
-    for (let w of fallbacks) {
-        if (distractors.size < 3 && w.toLowerCase() !== targetWord.toLowerCase()) distractors.add(w);
-    }
-    
-    const options = Array.from(distractors);
-    options.push(targetWord);
-    options.sort(() => 0.5 - Math.random()); // Shuffle options
-    
-    currentQuizQuestion = {
-        linePrompt: randomLine,
-        missingWord: targetWord,
-        blankedLine: blankedLine,
-        options: options
-    };
-    
-    // Update UI
-    document.getElementById("quiz-blank-line").innerText = blankedLine;
-    document.getElementById("quiz-feedback-box").style.display = "none";
-    document.getElementById("btn-next-quiz").style.display = "none";
-    
-    const container = document.getElementById("quiz-options-container");
-    container.innerHTML = "";
-    
-    options.forEach(opt => {
-        const btn = document.createElement("button");
-        btn.className = "quiz-opt-btn";
-        btn.innerText = opt;
-        btn.onclick = () => checkQuizAnswer(opt, btn);
-        container.appendChild(btn);
-    });
-}
-
-function checkQuizAnswer(selected, btn) {
-    if (!currentQuizQuestion) return;
-    
-    // Disable all options buttons
-    document.querySelectorAll(".quiz-opt-btn").forEach(b => b.disabled = true);
-    
-    const feedback = document.getElementById("quiz-feedback-box");
-    feedback.style.display = "block";
-    
-    const isCorrect = selected.toLowerCase() === currentQuizQuestion.missingWord.toLowerCase();
-    
-    if (isCorrect) {
-        btn.classList.add("correct");
-        feedback.className = "quiz-feedback-box feedback-success";
-        feedback.innerText = "A rima é perfeita! Você acertou! 🎉";
-    } else {
-        btn.classList.add("wrong");
-        feedback.className = "quiz-feedback-box feedback-error";
-        feedback.innerText = `Oops, tente de novo! A resposta correta era: "${currentQuizQuestion.missingWord}"`;
-        
-        // Highlight correct button
-        document.querySelectorAll(".quiz-opt-btn").forEach(b => {
-            if (b.innerText.toLowerCase() === currentQuizQuestion.missingWord.toLowerCase()) {
-                b.classList.add("correct");
-            }
-        });
-    }
-    
-    document.getElementById("btn-next-quiz").style.display = "block";
-}
-
-function nextQuizQuestion() {
-    if (currentPlayingSong) {
-        generateQuizQuestion(currentPlayingSong);
-    }
-}
-
-// Simulated Credit Shop purchase Pix checkout
-function buyCredits(amount) {
-    selectedPackAmount = amount;
-    const price = amount === 1 ? "19,90" : (amount === 3 ? "34,90" : "49,90");
-    
-    document.getElementById("pix-price").innerText = `R$ ${price}`;
-    
-    // Create valid copyable Pix string
-    const fullPixCode = `00020101021226830014br.gov.bcb.pix0136magicmusicpixkey@magicmusic.com5204000053039860503${price.replace(",", ".")}5802BR5907MagicMusic6009Sao Paulo6304`;
-    document.getElementById("pix-code-text").innerText = `${fullPixCode.substring(0, 32)}...`;
-    
-    // Setup Pix copying trigger
-    const clicker = document.getElementById("pix-code-clicker");
-    clicker.onclick = () => {
-        navigator.clipboard.writeText(fullPixCode);
-        alert("Código Pix copiado para a área de transferência!");
-    };
-    
-    // Setup confirm simulation trigger
-    const confirmBtn = document.getElementById("btn-confirm-payment");
-    confirmBtn.onclick = () => {
-        credits += selectedPackAmount;
-        AppDB.saveCredits(credits);
-        updateCreditsUI();
-        closeModal("pix-modal");
-        alert(`Pagamento confirmado! +${selectedPackAmount} créditos liberados!`);
-    };
-    
-    openModal("pix-modal");
 }
 
 // Client area: lookup and delivery
@@ -1439,12 +592,52 @@ function renderClientArea() {
         .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
         .forEach(song => {
             const card = document.createElement("div");
-            const ready = song.status === "ready" && Boolean(song.audioUrl);
             const color = (song.coverColorHex || "0xFFF43F5E").replace("0xFF", "#");
             const safeTitle = escapeHtml(song.title);
-            const safeCategory = escapeHtml(song.category);
-            const safeOccasion = escapeHtml(song.language);
             const safeCreatedAt = song.createdAt ? new Date(song.createdAt).toLocaleDateString("pt-BR") : "-";
+            const st = song.status;
+            const token = song.approvalToken;
+
+            const isDelivered   = st === "delivered" || st === "paid" || st === "ready";
+            const isPreview     = st === "preview_ready";
+            const isPayment     = st === "awaiting_payment";
+            const isAdjustment  = st === "adjustment_requested";
+
+            const statusLabel = isDelivered  ? "Entregue ✓"
+                : isPreview                  ? "Prévia disponível"
+                : isPayment                  ? "Aguardando pagamento"
+                : isAdjustment               ? "Ajuste solicitado"
+                                             : "Em produção";
+
+            const statusCls = isDelivered  ? "ready"
+                : isPreview              ? "preview-ready"
+                : isPayment              ? "awaiting-payment"
+                : isAdjustment           ? "adjustment"
+                                         : "pending";
+
+            const bodyText = isDelivered
+                ? "Seu MP3 final está pronto. Baixe abaixo."
+                : isPreview
+                ? "Sua prévia de 60 segundos está pronta! Ouça e aprove para gerar o pagamento."
+                : isPayment
+                ? "Prévia aprovada! Conclua o pagamento PIX para liberar o download completo."
+                : isAdjustment
+                ? "Pedido de ajuste recebido. Nossa equipe está revisando."
+                : "Nossa equipe está produzindo o áudio. Volte aqui para acompanhar.";
+
+            const actionsHtml = isDelivered ? `
+                <a class="btn btn-success" href="/api/download/${token}" download="${safeTitle}.mp3">
+                    <i class="material-icons">download</i> Baixar MP3
+                </a>` : isPreview && token ? `
+                <a class="btn btn-pink" href="/pedido/${token}" style="text-decoration:none;display:flex;align-items:center;gap:4px;">
+                    <i class="material-icons">headphones</i> Ouvir e Aprovar
+                </a>` : isPayment && token ? `
+                <a class="btn btn-pink" href="/pagamento/${token}" style="text-decoration:none;display:flex;align-items:center;gap:4px;">
+                    <i class="material-icons">pix</i> Pagar via PIX
+                </a>` : `
+                <button class="btn btn-secondary" disabled>
+                    <i class="material-icons">hourglass_top</i> Aguardando
+                </button>`;
 
             card.className = "client-song-card";
             card.innerHTML = `
@@ -1454,24 +647,12 @@ function renderClientArea() {
                     </div>
                     <div class="client-song-info">
                         <h4>${safeTitle}</h4>
-                        <p>${safeOccasion} · ${safeCategory}</p>
                         <span>Pedido em ${safeCreatedAt}</span>
                     </div>
-                    <span class="client-status ${ready ? "ready" : "pending"}">${ready ? "Pronta" : "Em produção"}</span>
+                    <span class="client-status ${statusCls}">${statusLabel}</span>
                 </div>
-                <div class="client-song-body">
-                    <p>${ready ? "Seu MP3 final já está liberado para ouvir e baixar." : "A equipe recebeu a letra e está produzindo o áudio final. Volte aqui com seu WhatsApp/e-mail para acompanhar."}</p>
-                </div>
-                <div class="client-song-actions">
-                    <button class="btn btn-secondary" onclick="openClientSong(${song.id})">
-                        <i class="material-icons">${ready ? "play_arrow" : "lyrics"}</i>
-                        ${ready ? "Ouvir" : "Ver letra"}
-                    </button>
-                    <button class="btn btn-success" ${ready ? "" : "disabled"} onclick="downloadClientSong(${song.id})">
-                        <i class="material-icons">download</i>
-                        Baixar MP3
-                    </button>
-                </div>
+                <div class="client-song-body"><p>${bodyText}</p></div>
+                <div class="client-song-actions">${actionsHtml}</div>
             `;
             container.appendChild(card);
         });
@@ -1480,43 +661,25 @@ function renderClientArea() {
 function openClientSong(songId) {
     const song = clientSongs.find(item => item.id === songId);
     if (!song) return;
-
-    song.isPurchased = true;
-    const existingIndex = songs.findIndex(item => item.id === song.id);
-    if (existingIndex >= 0) {
-        songs[existingIndex] = { ...songs[existingIndex], ...song, isPurchased: true };
-    } else {
-        songs.push({ ...song, isFavorite: false, isPurchased: true });
-    }
-    AppDB.saveSongs(songs);
-    selectSong(song);
+    switchTab("client");
 }
 
 function downloadClientSong(songId) {
     const song = clientSongs.find(item => item.id === songId);
-    if (!song || !isSongDelivered(song)) {
+    const isDelivered = song && (song.status === "delivered" || song.status === "paid" || song.status === "ready");
+    if (!isDelivered || !song.approvalToken) {
         alert("O MP3 final ainda não está disponível.");
         return;
     }
-
-    // v2.0: usa /api/download/:token; legado usa audioUrl direto
-    const href = song.approvalToken
-        ? `/api/download/${song.approvalToken}`
-        : song.audioUrl;
-
-    if (!href) { alert("Arquivo não encontrado."); return; }
-
     const link = document.createElement("a");
-    link.href = href;
+    link.href = `/api/download/${song.approvalToken}`;
     link.download = `${song.title}.mp3`;
-    link.target = "_blank";
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
 }
 
-// --- ADMIN MODE & WEB AUDIO PREVIEW INTEGRATION ---
-let purchasingSongId = null;
+// --- ADMIN MODE ---
 
 async function toggleAdminMode() {
     if (adminModeActive) {
@@ -1597,7 +760,7 @@ async function renderAdminPendingList() {
                 <div style="text-align: center; color: #a1a1aa; padding: 30px; border: 1px dashed rgba(255,255,255,0.1); border-radius: 8px;">
                     <i class="material-icons" style="font-size: 40px; color: #10b981; margin-bottom: 10px;">check_circle</i>
                     <h4 style="color: #fff; margin-bottom: 5px;">Tudo em dia!</h4>
-                    <p style="font-size: 13px; color: #a1a1aa;">Nenhuma música na fila aguardando áudio do Suno.</p>
+                    <p style="font-size: 13px; color: #a1a1aa;">Nenhuma música na fila aguardando envio de MP3.</p>
                 </div>
             `;
             return;
@@ -1625,7 +788,7 @@ async function renderAdminPendingList() {
                         <h4 style="color: #fff; font-size: 15px;">${safeTitle}</h4>
                         <p style="font-size: 12px; color: #a1a1aa;">Estilo: <strong>${safeCategory}</strong> | Destinatário: <strong>${safeRecipient}</strong></p>
                     </div>
-                    <span style="font-size: 11px; padding: 2px 6px; background: rgba(245, 158, 11, 0.1); color: #f59e0b; border-radius: 4px;">Aguardando Suno</span>
+                    <span style="font-size: 11px; padding: 2px 6px; background: rgba(245, 158, 11, 0.1); color: #f59e0b; border-radius: 4px;">Aguardando MP3</span>
                 </div>
 
                 <div style="margin-bottom: 12px; background: rgba(16, 185, 129, 0.06); border: 1px solid rgba(16, 185, 129, 0.12); border-radius: 6px; padding: 10px;">
@@ -1634,7 +797,7 @@ async function renderAdminPendingList() {
                 </div>
                 
                 <div style="margin-bottom: 10px;">
-                    <p style="font-size: 12px; color: #a1a1aa; margin-bottom: 4px;"><strong>Prompt do Suno (Crie no Suno com este estilo):</strong></p>
+                    <p style="font-size: 12px; color: #a1a1aa; margin-bottom: 4px;"><strong>Estilo Musical:</strong></p>
                     <div style="display: flex; gap: 8px;">
                         <input type="text" readonly value="${safeSunoPrompt}" id="suno-prompt-${song.id}" style="flex: 1; background: #000; border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 4px 8px; font-size: 12px; border-radius: 4px;">
                         <button onclick="copyTextById('suno-prompt-${song.id}')" style="background: #27272a; border: none; color: #fff; padding: 4px 10px; font-size: 12px; border-radius: 4px; cursor: pointer;">Copiar</button>
@@ -1642,7 +805,7 @@ async function renderAdminPendingList() {
                 </div>
                 
                 <div style="margin-bottom: 12px;">
-                    <p style="font-size: 12px; color: #a1a1aa; margin-bottom: 4px;"><strong>Letra Gerada (Use no modo Custom no Suno):</strong></p>
+                    <p style="font-size: 12px; color: #a1a1aa; margin-bottom: 4px;"><strong>Letra do Pedido:</strong></p>
                     <div style="display: flex; gap: 8px;">
                         <textarea readonly id="suno-lyrics-${song.id}" style="flex: 1; height: 60px; background: #000; border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 4px 8px; font-size: 11px; border-radius: 4px; resize: none; font-family: monospace;">${safeLyrics}</textarea>
                         <button onclick="copyTextById('suno-lyrics-${song.id}')" style="background: #27272a; border: none; color: #fff; padding: 4px 10px; font-size: 12px; border-radius: 4px; cursor: pointer; align-self: flex-start;">Copiar</button>
@@ -1650,8 +813,11 @@ async function renderAdminPendingList() {
                 </div>
                 
                 <div style="border-top: 1px solid rgba(255,255,255,0.05); padding-top: 10px; display: flex; gap: 10px; align-items: center;">
-                    <input type="text" placeholder="Cole a URL do áudio MP3 gerado no Suno" id="audio-input-${song.id}" style="flex: 1; background: #000; border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 6px 10px; font-size: 13px; border-radius: 4px;">
-                    <button onclick="submitAudioUrl(${song.id})" style="background: #10b981; border: none; color: #000; font-weight: bold; padding: 6px 15px; font-size: 13px; border-radius: 4px; cursor: pointer;">Liberar Música</button>
+                    <label style="flex: 1; background: #000; border: 1px dashed rgba(255,255,255,0.2); color: #a1a1aa; padding: 6px 10px; font-size: 13px; border-radius: 4px; cursor: pointer; text-align: center;">
+                        <input type="file" accept="audio/mpeg,audio/mp3" id="mp3-file-${song.id}" style="display:none;" onchange="updateFileLabel(${song.id})">
+                        <span id="mp3-label-${song.id}">📁 Selecionar MP3</span>
+                    </label>
+                    <button onclick="uploadMp3File(${song.id})" style="background: #10b981; border: none; color: #000; font-weight: bold; padding: 6px 15px; font-size: 13px; border-radius: 4px; cursor: pointer; white-space: nowrap;">Enviar MP3</button>
                 </div>
             `;
             container.appendChild(card);
@@ -1671,110 +837,71 @@ function copyTextById(id) {
     }
 }
 
-async function submitAudioUrl(songId) {
-    const audioUrl = document.getElementById(`audio-input-${songId}`).value.trim();
-    if (!audioUrl) {
-        alert("Cole a URL do áudio primeiro!");
+function updateFileLabel(songId) {
+    const input = document.getElementById(`mp3-file-${songId}`);
+    const label = document.getElementById(`mp3-label-${songId}`);
+    if (input && input.files[0]) {
+        label.textContent = `✅ ${input.files[0].name}`;
+    }
+}
+
+async function uploadMp3File(songId) {
+    const input = document.getElementById(`mp3-file-${songId}`);
+    if (!input || !input.files[0]) {
+        alert("Selecione um arquivo MP3 primeiro.");
         return;
     }
-    
+    const file = input.files[0];
+    const label = document.getElementById(`mp3-label-${songId}`);
+    label.textContent = "⏳ Enviando...";
     try {
-        const response = await fetch("/api/admin/submit-audio", {
+        const response = await fetch("/api/admin/upload-audio", {
             method: "POST",
             headers: {
-                "Content-Type": "application/json",
+                "Content-Type": "audio/mpeg",
+                "X-Song-Id": String(songId),
                 ...getAdminHeaders()
             },
-            body: JSON.stringify({ songId, audioUrl })
+            body: file
         });
-        
         if (response.ok) {
-            alert("Música liberada com sucesso! O áudio já está disponível para o cliente.");
-            await syncSongsWithServer();
-            renderAdminPendingList();
+            alert("MP3 enviado e prévia gerada! O cliente já pode ouvir e aprovar.");
+            await renderAdminPendingList();
         } else {
-            alert("Falha ao salvar. Verifique a conexão com o servidor.");
+            const data = await response.json().catch(() => ({}));
+            alert("Erro ao enviar: " + (data.error || response.status));
+            label.textContent = "📁 Selecionar MP3 do computador";
         }
     } catch (e) {
         console.error(e);
-        alert("Erro de rede ao salvar.");
+        alert("Erro de rede ao enviar o arquivo.");
+        label.textContent = "📁 Selecionar MP3 do computador";
     }
 }
 
-function openSongPurchaseCheckout(song) {
-    purchasingSongId = song.id;
-    const price = "19,90";
-    document.getElementById("pix-price").innerText = `R$ ${price}`;
-    
-    const fullPixCode = `00020101021226830014br.gov.bcb.pix0136magicmusicpixkey@magicmusic.com520400005303986050319.905802BR5907MagicMusic6009Sao Paulo6304`;
-    document.getElementById("pix-code-text").innerText = `${fullPixCode.substring(0, 32)}...`;
-    
-    const clicker = document.getElementById("pix-code-clicker");
-    clicker.onclick = () => {
-        navigator.clipboard.writeText(fullPixCode);
-        alert("Código Pix de compra da música copiado!");
-    };
-    
-    const confirmBtn = document.getElementById("btn-confirm-payment");
-    confirmBtn.onclick = async () => {
-        try {
-            // Confirm purchase on server
-            await fetch("/api/purchase-song", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ songId: song.id })
-            });
-            
-            // Update local state
-            song.isPurchased = true;
-            songs = songs.map(s => s.id === song.id ? { ...s, isPurchased: true } : s);
-            AppDB.saveSongs(songs);
-            
-            closeModal("pix-modal");
-            alert(`Pagamento confirmado! A música "${song.title}" foi liberada por completo para ouvir e baixar!`);
-            
-            purchasingSongId = null;
-            renderPlayerScreen();
-            renderLibraryScreen();
-            
-            // Resume play
-            playSong();
-        } catch (e) {
-            console.error("Error confirming song purchase:", e);
-            // Fallback unlock if server offline
-            song.isPurchased = true;
-            songs = songs.map(s => s.id === song.id ? { ...s, isPurchased: true } : s);
-            AppDB.saveSongs(songs);
-            closeModal("pix-modal");
-            alert(`Pagamento confirmado! A música foi liberada.`);
-            purchasingSongId = null;
-            renderPlayerScreen();
-            renderLibraryScreen();
-            playSong();
-        }
-    };
-
-    openModal("pix-modal");
-}
-
 // =====================================================================
-// MAGIC MUSIC v2.0 — APPROVAL SCREEN & NEW STATUS LOGIC
+// APPROVAL SCREEN — /pedido/:token
 // =====================================================================
 
-let approvalToken = null;
-let approvalAudioEl = null;
-let approvalPlaying = false;
-
-// --- Route detection ---
 function detectRoute() {
     const routePath = window.location.pathname;
     if (routePath.startsWith('/pedido/')) {
         const token = routePath.replace('/pedido/', '').split('/')[0];
-        if (token) { showApprovalScreen(token); return true; }
+        if (token) {
+            const app = document.querySelector('.app-container');
+            if (app) app.style.display = 'none';
+            showApprovalScreen(token);
+            return true;
+        }
     }
     if (routePath.startsWith('/pagamento/')) {
         const token = routePath.replace('/pagamento/', '').split('/')[0];
-        if (token) { showPaymentScreen(token); return true; }
+        if (token) {
+            const app = document.querySelector('.app-container');
+            if (app) app.style.display = 'none';
+            showPaymentScreen(token);
+            return true;
+        }
     }
     return false;
 }
@@ -1785,64 +912,72 @@ function showApprovalScreen(token) {
     if (!screen) return;
     screen.style.display = 'flex';
     screen.style.flexDirection = 'column';
-    document.getElementById('approval-loading').style.display = 'flex';
-    document.getElementById('approval-loading').style.flexDirection = 'column';
-    document.getElementById('approval-loading').style.alignItems = 'center';
-    document.getElementById('approval-content').style.display = 'none';
-    document.getElementById('approval-error').style.display = 'none';
+    const loading = document.getElementById('approval-loading');
+    if (loading) { loading.style.display = 'flex'; loading.style.flexDirection = 'column'; loading.style.alignItems = 'center'; }
+    const content = document.getElementById('approval-content');
+    if (content) content.style.display = 'none';
+    const err = document.getElementById('approval-error');
+    if (err) err.style.display = 'none';
     fetchApprovalOrder(token);
 }
 
 async function fetchApprovalOrder(token) {
     try {
-        const resp = await fetch(`/api/order/${token}`);
+        const resp = await fetch('/api/order/' + token);
         if (!resp.ok) throw new Error('not_found');
         const song = await resp.json();
         renderApprovalContent(song);
     } catch (_) {
-        document.getElementById('approval-loading').style.display = 'none';
-        document.getElementById('approval-error').style.display = 'block';
+        const loading = document.getElementById('approval-loading');
+        if (loading) loading.style.display = 'none';
+        const err = document.getElementById('approval-error');
+        if (err) err.style.display = 'block';
     }
 }
 
 function renderApprovalContent(song) {
-    document.getElementById('approval-loading').style.display = 'none';
-
+    const loading = document.getElementById('approval-loading');
+    if (loading) loading.style.display = 'none';
     const color = (song.coverColorHex || '0xFFF43F5E').replace('0xFF', '#');
-    document.getElementById('approval-cover').style.background = color;
-    document.getElementById('approval-title').textContent = song.title || '—';
-    document.getElementById('approval-meta').textContent = `${song.language || '—'} · ${song.category || '—'}`;
-    document.getElementById('approval-date').textContent = song.createdAt
-        ? `Pedido em ${new Date(song.createdAt).toLocaleDateString('pt-BR')}`
-        : '';
-
+    const cover = document.getElementById('approval-cover');
+    if (cover) cover.style.background = color;
+    const titleEl = document.getElementById('approval-title');
+    if (titleEl) titleEl.textContent = song.title || '—';
+    const metaEl = document.getElementById('approval-meta');
+    if (metaEl) metaEl.textContent = (song.language || '—') + ' · ' + (song.category || '—');
+    const dateEl = document.getElementById('approval-date');
+    if (dateEl) dateEl.textContent = song.createdAt ? 'Pedido em ' + new Date(song.createdAt).toLocaleDateString('pt-BR') : '';
     if (song.status === 'awaiting_payment') {
-        window.location.href = `/pagamento/${song.approvalToken}`;
+        window.location.href = '/pagamento/' + song.approvalToken;
         return;
     }
     if (song.status === 'adjustment_requested') {
-        document.getElementById('approval-state-adjusted').style.display = 'block';
+        const adj = document.getElementById('approval-state-adjusted');
+        if (adj) adj.style.display = 'block';
         return;
     }
-
-    document.getElementById('approval-content').style.display = 'block';
-
+    const contentEl = document.getElementById('approval-content');
+    if (contentEl) contentEl.style.display = 'block';
     if (song.previewUrl) {
-        const player = document.getElementById('approval-player-wrap');
-        player.style.display = 'block';
+        const wrap = document.getElementById('approval-player-wrap');
+        if (wrap) wrap.style.display = 'block';
         approvalAudioEl = document.getElementById('approval-audio');
-        approvalAudioEl.src = song.previewUrl;
-        approvalAudioEl.addEventListener('timeupdate', updateApprovalProgress);
-        approvalAudioEl.addEventListener('ended', () => {
-            approvalPlaying = false;
-            document.getElementById('approval-play-icon').textContent = 'play_arrow';
-        });
+        if (approvalAudioEl) {
+            approvalAudioEl.src = song.previewUrl;
+            approvalAudioEl.addEventListener('timeupdate', updateApprovalProgress);
+            approvalAudioEl.addEventListener('ended', function() {
+                approvalPlaying = false;
+                const icon = document.getElementById('approval-play-icon');
+                if (icon) icon.textContent = 'play_arrow';
+            });
+        }
     } else {
-        document.getElementById('approval-no-preview').style.display = 'block';
+        const noPreview = document.getElementById('approval-no-preview');
+        if (noPreview) noPreview.style.display = 'block';
     }
-
     if (['paid', 'delivered', 'cancelled'].includes(song.status)) {
-        document.getElementById('approval-actions').style.display = 'none';
+        const actions = document.getElementById('approval-actions');
+        if (actions) actions.style.display = 'none';
     }
 }
 
@@ -1851,22 +986,27 @@ function toggleApprovalPlay() {
     if (approvalPlaying) {
         approvalAudioEl.pause();
         approvalPlaying = false;
-        document.getElementById('approval-play-icon').textContent = 'play_arrow';
+        const icon = document.getElementById('approval-play-icon');
+        if (icon) icon.textContent = 'play_arrow';
     } else {
         approvalAudioEl.play();
         approvalPlaying = true;
-        document.getElementById('approval-play-icon').textContent = 'pause';
+        const icon = document.getElementById('approval-play-icon');
+        if (icon) icon.textContent = 'pause';
     }
 }
 
 function updateApprovalProgress() {
     if (!approvalAudioEl || !approvalAudioEl.duration) return;
     const pct = (approvalAudioEl.currentTime / approvalAudioEl.duration) * 100;
-    document.getElementById('approval-progress').value = pct;
-    document.getElementById('approval-progress-fill').style.width = pct + '%';
+    const prog = document.getElementById('approval-progress');
+    if (prog) prog.value = pct;
+    const fill = document.getElementById('approval-progress-fill');
+    if (fill) fill.style.width = pct + '%';
     const m = Math.floor(approvalAudioEl.currentTime / 60);
     const s = Math.floor(approvalAudioEl.currentTime % 60);
-    document.getElementById('approval-time').textContent = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    const timeEl = document.getElementById('approval-time');
+    if (timeEl) timeEl.textContent = String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
 }
 
 function seekApprovalAudio(value) {
@@ -1875,13 +1015,17 @@ function seekApprovalAudio(value) {
 }
 
 function showAdjustForm() {
-    document.getElementById('approval-actions').style.display = 'none';
-    document.getElementById('approval-adjust-form').style.display = 'block';
+    const actions = document.getElementById('approval-actions');
+    if (actions) actions.style.display = 'none';
+    const form = document.getElementById('approval-adjust-form');
+    if (form) form.style.display = 'block';
 }
 
 function hideAdjustForm() {
-    document.getElementById('approval-adjust-form').style.display = 'none';
-    document.getElementById('approval-actions').style.display = 'flex';
+    const form = document.getElementById('approval-adjust-form');
+    if (form) form.style.display = 'none';
+    const actions = document.getElementById('approval-actions');
+    if (actions) actions.style.display = 'flex';
 }
 
 async function approveOrder() {
@@ -1894,14 +1038,15 @@ async function approveOrder() {
         });
         if (!resp.ok) throw new Error('error');
         if (approvalAudioEl) approvalAudioEl.pause();
-        window.location.href = `/pagamento/${approvalToken}`;
+        window.location.href = '/pagamento/' + approvalToken;
     } catch (_) {
         alert('Não foi possível aprovar o pedido. Tente novamente.');
     }
 }
 
 async function submitAdjustment() {
-    const desc = document.getElementById('approval-adjust-desc').value.trim();
+    const descEl = document.getElementById('approval-adjust-desc');
+    const desc = descEl ? descEl.value.trim() : '';
     if (!desc) { alert('Descreva o ajuste desejado.'); return; }
     if (!approvalToken) return;
     try {
@@ -1911,359 +1056,15 @@ async function submitAdjustment() {
             body: JSON.stringify({ token: approvalToken, description: desc })
         });
         if (!resp.ok) throw new Error('error');
-        document.getElementById('approval-content').style.display = 'none';
-        document.getElementById('approval-adjust-form').style.display = 'none';
-        document.getElementById('approval-state-adjusted').style.display = 'block';
+        const contentEl = document.getElementById('approval-content');
+        if (contentEl) contentEl.style.display = 'none';
+        const form = document.getElementById('approval-adjust-form');
+        if (form) form.style.display = 'none';
+        const adjState = document.getElementById('approval-state-adjusted');
+        if (adjState) adjState.style.display = 'block';
         if (approvalAudioEl) approvalAudioEl.pause();
     } catch (_) {
         alert('Não foi possível enviar o ajuste. Tente novamente.');
-    }
-}
-
-// ---- Updated renderClientArea with v2.0 status support ----
-const STATUS_LABEL_MAP = {
-    pending_audio:        { label: 'Em produção',          cls: 'pending' },
-    preview_ready:        { label: 'Prévia disponível',    cls: 'preview-ready' },
-    adjustment_requested: { label: 'Ajuste solicitado',   cls: 'adjustment' },
-    awaiting_payment:     { label: 'Aguardando pagamento', cls: 'awaiting-payment' },
-    paid:                 { label: 'Pago',                 cls: 'paid' },
-    delivered:            { label: 'Entregue',             cls: 'delivered' },
-    ready:                { label: 'Pronta',               cls: 'ready' },
-    cancelled:            { label: 'Cancelado',            cls: 'cancelled' },
-    draft:                { label: 'Rascunho',             cls: 'pending' }
-};
-
-function getStatusInfo(song) {
-    return STATUS_LABEL_MAP[song.status] || { label: song.status, cls: 'pending' };
-}
-
-function isSongDelivered(song) {
-    return song.status === 'delivered' || song.status === 'paid' || (song.status === 'ready' && Boolean(song.audioUrl));
-}
-
-function renderClientArea() {
-    const container = document.getElementById("client-results");
-    if (!container) return;
-
-    if (!Array.isArray(clientSongs) || clientSongs.length === 0) {
-        const initialTitle = clientLookupPerformed ? "Nenhum pedido encontrado" : "Entre com seu contato";
-        const initialText = clientLookupPerformed
-            ? "Digite o mesmo WhatsApp ou e-mail usado quando a música foi enviada para produção."
-            : "Use o mesmo WhatsApp ou e-mail informado na criação da música.";
-        const initialIcon = clientLookupPerformed ? "manage_search" : "account_circle";
-        container.innerHTML = `
-            <div class="client-empty-state">
-                <i class="material-icons">${initialIcon}</i>
-                <h4>${initialTitle}</h4>
-                <p>${initialText}</p>
-            </div>`;
-        return;
-    }
-
-    container.innerHTML = "";
-    clientSongs
-        .slice()
-        .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
-        .forEach(song => {
-            const card = document.createElement("div");
-            const delivered = isSongDelivered(song);
-            const statusInfo = getStatusInfo(song);
-            const color = (song.coverColorHex || "0xFFF43F5E").replace("0xFF", "#");
-            const safeTitle = escapeHtml(song.title);
-            const safeCategory = escapeHtml(song.category);
-            const safeOccasion = escapeHtml(song.language);
-            const safeDate = song.createdAt ? new Date(song.createdAt).toLocaleDateString("pt-BR") : "-";
-            const hasPreview = song.status === 'preview_ready' || song.status === 'adjustment_requested';
-            const awaitingPayment = song.status === 'awaiting_payment' && song.approvalToken;
-            const approvalLink = song.approvalToken ? `/pedido/${song.approvalToken}` : null;
-            const paymentLink = song.approvalToken ? `/pagamento/${song.approvalToken}` : null;
-
-            let bodyText = "A equipe recebeu a letra e está produzindo o áudio final.";
-            if (song.status === 'preview_ready') bodyText = "Sua prévia está pronta! Ouça e aprove para avançar.";
-            else if (song.status === 'adjustment_requested') bodyText = "Ajuste solicitado. Nossa equipe está revisando e enviará nova prévia em breve.";
-            else if (song.status === 'awaiting_payment') bodyText = "Prévia aprovada! Realize o pagamento para liberar o download completo.";
-            else if (delivered) bodyText = "Seu MP3 final está liberado para ouvir e baixar!";
-
-            let primaryAction;
-            if (awaitingPayment) {
-                primaryAction = `<a class="btn btn-pink" href="${paymentLink}" style="text-decoration:none;display:flex;align-items:center;gap:4px;">
-                    <i class="material-icons">pix</i> Pagar agora
-                </a>`;
-            } else if (hasPreview && approvalLink) {
-                primaryAction = `<a class="btn btn-primary" href="${approvalLink}" style="text-decoration:none;display:flex;align-items:center;gap:4px;">
-                    <i class="material-icons">play_circle</i> Ouvir e Aprovar
-                </a>`;
-            } else {
-                primaryAction = `<button class="btn btn-secondary" onclick="openClientSong(${song.id})">
-                    <i class="material-icons">${delivered ? 'play_arrow' : 'lyrics'}</i>
-                    ${delivered ? 'Ouvir' : 'Ver letra'}
-                </button>`;
-            }
-
-            card.className = "client-song-card";
-            card.innerHTML = `
-                <div class="client-song-top">
-                    <div class="client-cover" style="background-color:${color}"><i class="material-icons">music_note</i></div>
-                    <div class="client-song-info">
-                        <h4>${safeTitle}</h4>
-                        <p>${safeOccasion} · ${safeCategory}</p>
-                        <span>Pedido em ${safeDate}</span>
-                    </div>
-                    <span class="client-status ${statusInfo.cls}">${statusInfo.label}</span>
-                </div>
-                <div class="client-song-body"><p>${bodyText}</p></div>
-                <div class="client-song-actions">
-                    ${primaryAction}
-                    <button class="btn btn-success" ${delivered ? "" : "disabled"} onclick="downloadClientSong(${song.id})">
-                        <i class="material-icons">download</i> Baixar MP3
-                    </button>
-                </div>`;
-            container.appendChild(card);
-        });
-}
-
-// ---- Updated submitAudioUrl with v2.0 feedback ----
-async function submitAudioUrl(songId) {
-    const audioUrl = document.getElementById(`audio-input-${songId}`).value.trim();
-    if (!audioUrl) { alert("Cole a URL do áudio primeiro!"); return; }
-
-    const btn = document.querySelector(`[onclick="submitAudioUrl(${songId})"]`);
-    if (btn) { btn.disabled = true; btn.textContent = "Processando…"; }
-
-    try {
-        const response = await fetch("/api/admin/submit-audio", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", ...getAdminHeaders() },
-            body: JSON.stringify({ songId, audioUrl })
-        });
-        const data = await response.json();
-        if (response.ok) {
-            const msg = data.previewGenerated
-                ? `✅ Prévia gerada com sucesso!\n\nLink de aprovação para o cliente:\n${data.approvalUrl}`
-                : `⚠️ Prévia sem FFmpeg (link externo usado).\n\nLink de aprovação:\n${data.approvalUrl}`;
-            alert(msg);
-            await syncSongsWithServer();
-            renderAdminPendingList();
-        } else {
-            alert("Falha: " + (data.error || "Verifique a conexão."));
-            if (btn) { btn.disabled = false; btn.textContent = "Gerar Prévia"; }
-        }
-    } catch (e) {
-        console.error(e);
-        alert("Erro de rede ao salvar.");
-        if (btn) { btn.disabled = false; btn.textContent = "Gerar Prévia"; }
-    }
-}
-
-// ---- Admin panel: show all statuses ----
-function adminStatusBadge(status) {
-    const map = {
-        pending_audio:        ['pending-audio',    'Aguardando Suno'],
-        adjustment_requested: ['adjustment',       'Ajuste Solicitado'],
-        preview_ready:        ['preview-ready',    'Aguardando Aprovação'],
-        awaiting_payment:     ['awaiting-payment', 'Aguardando Pagamento'],
-        paid:                 ['paid',             'Pago'],
-        delivered:            ['delivered',        'Entregue'],
-        ready:                ['paid',             'Pronto (legado)'],
-        cancelled:            ['cancelled',        'Cancelado'],
-        draft:                ['cancelled',        'Rascunho']
-    };
-    const [cls, label] = map[status] || ['cancelled', status];
-    return `<span class="status-badge ${cls}">${label}</span>`;
-}
-
-async function renderAdminPendingList() {
-    const container = document.getElementById("admin-pending-list");
-    if (!container) return;
-
-    container.innerHTML = `<div style="color:#a1a1aa;padding:20px;text-align:center;font-size:14px;">Carregando pedidos…</div>`;
-
-    try {
-        const response = await fetch("/api/admin/orders", { headers: getAdminHeaders() });
-        if (response.status === 401) {
-            adminModeActive = false; adminSessionPassword = "";
-            document.querySelector('.btn-admin-trigger').style.color = '#a1a1aa';
-            switchTab("library");
-            alert("Sessão administrativa expirada ou senha inválida.");
-            return;
-        }
-        if (!response.ok) throw new Error("Server error");
-        const allOrders = await response.json();
-
-        if (allOrders.length === 0) {
-            container.innerHTML = `
-                <div style="text-align:center;color:#a1a1aa;padding:30px;border:1px dashed rgba(255,255,255,0.1);border-radius:8px;">
-                    <i class="material-icons" style="font-size:40px;color:#10b981;margin-bottom:10px;">check_circle</i>
-                    <h4 style="color:#fff;margin-bottom:5px;">Nenhum pedido ainda.</h4>
-                </div>`;
-            return;
-        }
-
-        const actionNeeded = allOrders.filter(s => ['pending_audio', 'adjustment_requested'].includes(s.status));
-        const others = allOrders.filter(s => !['pending_audio', 'adjustment_requested'].includes(s.status));
-
-        container.innerHTML = "";
-
-        if (actionNeeded.length > 0) {
-            const lbl = document.createElement('p');
-            lbl.style = "font-size:11px;color:#f59e0b;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;font-weight:700;";
-            lbl.textContent = "⚡ Ação Necessária";
-            container.appendChild(lbl);
-            actionNeeded.forEach(song => container.appendChild(buildAdminCard(song, true)));
-        }
-
-        if (others.length > 0) {
-            const lbl = document.createElement('p');
-            lbl.style = "font-size:11px;color:#a1a1aa;text-transform:uppercase;letter-spacing:1px;margin:16px 0 10px;font-weight:700;";
-            lbl.textContent = "Histórico";
-            container.appendChild(lbl);
-            others.forEach(song => container.appendChild(buildAdminCard(song, false)));
-        }
-
-    } catch (e) {
-        console.error(e);
-        container.innerHTML = `<div style="color:#ef4444;padding:20px;text-align:center;font-size:14px;">Erro ao carregar do servidor.</div>`;
-    }
-}
-
-function buildAdminCard(song, showAudioInput) {
-    const card = document.createElement("div");
-    const recipient = song.artist?.split('&')[1]?.trim() || "Desconhecido";
-    const safeTitle = escapeHtml(song.title);
-    const safeCategory = escapeHtml(song.category);
-    const safeRecipient = escapeHtml(recipient);
-    const safeSunoPrompt = escapeHtml(song.sunoPrompt || "");
-    const safeLyrics = escapeHtml(song.originalLyrics || "");
-    const safeCustomerName = escapeHtml(song.customerName || "-");
-    const safeCustomerWhatsapp = escapeHtml(song.customerWhatsapp || "-");
-    const safeCustomerEmail = escapeHtml(song.customerEmail || "-");
-    const safeCustomerNotes = escapeHtml(song.customerNotes || "-");
-    const safeDate = song.createdAt ? new Date(song.createdAt).toLocaleDateString("pt-BR") : "-";
-    const approvalLink = song.approvalToken ? `/pedido/${song.approvalToken}` : null;
-
-    let adjustHistory = "";
-    if (Array.isArray(song.adjustmentHistory) && song.adjustmentHistory.length > 0) {
-        const items = song.adjustmentHistory.map(a =>
-            `<p style="font-size:12px;color:#fbbf24;margin-top:4px;">• ${escapeHtml(a.description)} <span style="color:#71717a;">(${a.requestedAt ? new Date(a.requestedAt).toLocaleDateString('pt-BR') : '-'})</span></p>`
-        ).join('');
-        adjustHistory = `<div style="margin-bottom:10px;padding:10px;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.15);border-radius:6px;">
-            <p style="font-size:12px;color:#d4d4d8;margin-bottom:4px;"><strong>Histórico de Ajustes</strong></p>${items}</div>`;
-    }
-
-    card.className = "pending-admin-card";
-    card.style = "background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.05);padding:15px;border-radius:8px;margin-bottom:12px;";
-    card.innerHTML = `
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:1px solid rgba(255,255,255,0.05);padding-bottom:8px;margin-bottom:10px;">
-            <div>
-                <h4 style="color:#fff;font-size:15px;">${safeTitle}</h4>
-                <p style="font-size:12px;color:#a1a1aa;">Estilo: <strong>${safeCategory}</strong> | Para: <strong>${safeRecipient}</strong> | ${safeDate}</p>
-            </div>
-            ${adminStatusBadge(song.status)}
-        </div>
-        <div style="margin-bottom:12px;background:rgba(16,185,129,0.06);border:1px solid rgba(16,185,129,0.12);border-radius:6px;padding:10px;">
-            <p style="font-size:12px;color:#d4d4d8;margin-bottom:6px;"><strong>Contato</strong></p>
-            <p style="font-size:12px;color:#a1a1aa;line-height:1.6;">
-                Nome: <strong style="color:#fff;">${safeCustomerName}</strong> |
-                WhatsApp: <strong style="color:#fff;">${safeCustomerWhatsapp}</strong> |
-                E-mail: <strong style="color:#fff;">${safeCustomerEmail}</strong>
-                ${safeCustomerNotes !== '-' ? `<br>Obs.: <strong style="color:#fff;">${safeCustomerNotes}</strong>` : ''}
-            </p>
-        </div>
-        ${adjustHistory}
-        ${approvalLink ? `<div style="margin-bottom:10px;padding:8px 12px;background:rgba(99,102,241,0.08);border:1px solid rgba(99,102,241,0.15);border-radius:6px;font-size:12px;">
-            🔗 <a href="${approvalLink}" target="_blank" style="color:#818cf8;">${approvalLink}</a>
-        </div>` : ""}
-        ${showAudioInput ? `
-        <div style="margin-bottom:10px;">
-            <p style="font-size:12px;color:#a1a1aa;margin-bottom:4px;"><strong>Prompt do Suno:</strong></p>
-            <div style="display:flex;gap:8px;">
-                <input type="text" readonly value="${safeSunoPrompt}" id="suno-prompt-${song.id}" style="flex:1;background:#000;border:1px solid rgba(255,255,255,0.1);color:#fff;padding:4px 8px;font-size:12px;border-radius:4px;">
-                <button onclick="copyTextById('suno-prompt-${song.id}')" style="background:#27272a;border:none;color:#fff;padding:4px 10px;font-size:12px;border-radius:4px;cursor:pointer;">Copiar</button>
-            </div>
-        </div>
-        <div style="margin-bottom:12px;">
-            <p style="font-size:12px;color:#a1a1aa;margin-bottom:4px;"><strong>Letra Gerada:</strong></p>
-            <div style="display:flex;gap:8px;">
-                <textarea readonly id="suno-lyrics-${song.id}" style="flex:1;height:60px;background:#000;border:1px solid rgba(255,255,255,0.1);color:#fff;padding:4px 8px;font-size:11px;border-radius:4px;resize:none;font-family:monospace;">${safeLyrics}</textarea>
-                <button onclick="copyTextById('suno-lyrics-${song.id}')" style="background:#27272a;border:none;color:#fff;padding:4px 10px;font-size:12px;border-radius:4px;cursor:pointer;align-self:flex-start;">Copiar</button>
-            </div>
-        </div>
-        <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:12px;">
-            <p style="font-size:12px;color:#a1a1aa;margin-bottom:8px;"><strong>Enviar áudio:</strong></p>
-            <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
-                <label for="file-input-${song.id}" style="flex:1;background:#000;border:1px dashed rgba(255,255,255,0.2);color:#a1a1aa;padding:8px 10px;font-size:12px;border-radius:4px;cursor:pointer;text-align:center;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-                    <i class="material-icons" style="font-size:14px;vertical-align:middle;margin-right:4px;">upload_file</i>
-                    <span id="file-label-${song.id}">Escolher arquivo MP3</span>
-                </label>
-                <input type="file" accept="audio/mpeg,audio/mp3,.mp3" id="file-input-${song.id}" style="display:none;" onchange="onAudioFileSelected(${song.id})">
-                <button onclick="uploadAudioFile(${song.id})" id="btn-upload-${song.id}" disabled style="background:#6366f1;border:none;color:#fff;font-weight:bold;padding:6px 14px;font-size:13px;border-radius:4px;cursor:pointer;opacity:0.5;">Enviar</button>
-            </div>
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
-                <div style="flex:1;height:1px;background:rgba(255,255,255,0.07);"></div>
-                <span style="font-size:11px;color:#52525b;">ou cole a URL</span>
-                <div style="flex:1;height:1px;background:rgba(255,255,255,0.07);"></div>
-            </div>
-            <div style="display:flex;gap:8px;align-items:center;">
-                <input type="text" placeholder="URL do MP3 gerado no Suno" id="audio-input-${song.id}" style="flex:1;background:#000;border:1px solid rgba(255,255,255,0.1);color:#fff;padding:6px 10px;font-size:13px;border-radius:4px;">
-                <button onclick="submitAudioUrl(${song.id})" style="background:#10b981;border:none;color:#000;font-weight:bold;padding:6px 15px;font-size:13px;border-radius:4px;cursor:pointer;">Gerar Prévia</button>
-            </div>
-        </div>
-        ` : ""}
-    `;
-    return card;
-}
-
-// ---- Admin: upload MP3 do computador ----
-function onAudioFileSelected(songId) {
-    const input = document.getElementById(`file-input-${songId}`);
-    const label = document.getElementById(`file-label-${songId}`);
-    const btn = document.getElementById(`btn-upload-${songId}`);
-    if (input.files && input.files[0]) {
-        label.textContent = input.files[0].name;
-        btn.disabled = false;
-        btn.style.opacity = '1';
-    }
-}
-
-async function uploadAudioFile(songId) {
-    const input = document.getElementById(`file-input-${songId}`);
-    const btn = document.getElementById(`btn-upload-${songId}`);
-    if (!input.files || !input.files[0]) { alert('Selecione um arquivo MP3.'); return; }
-    const file = input.files[0];
-
-    btn.disabled = true;
-    btn.textContent = 'Enviando…';
-    btn.style.opacity = '0.6';
-
-    try {
-        const resp = await fetch('/api/admin/upload-audio', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'audio/mpeg',
-                'X-Song-Id': String(songId),
-                ...getAdminHeaders()
-            },
-            body: file
-        });
-        const data = await resp.json();
-        if (resp.ok) {
-            const msg = data.previewGenerated
-                ? `✅ Upload concluído! Prévia gerada.\n\nLink de aprovação:\n${data.approvalUrl}`
-                : `⚠️ Upload feito, prévia sem FFmpeg.\n\nLink:\n${data.approvalUrl}`;
-            alert(msg);
-            await syncSongsWithServer();
-            renderAdminPendingList();
-        } else {
-            alert('Erro: ' + (data.error || 'Tente novamente.'));
-            btn.disabled = false;
-            btn.textContent = 'Enviar';
-            btn.style.opacity = '1';
-        }
-    } catch (e) {
-        alert('Erro de rede: ' + e.message);
-        btn.disabled = false;
-        btn.textContent = 'Enviar';
-        btn.style.opacity = '1';
     }
 }
 
@@ -2271,80 +1072,103 @@ async function uploadAudioFile(songId) {
 // PAYMENT SCREEN — /pagamento/:token
 // =====================================================================
 
-let paymentToken = null;
-let pixCopyPasteCode = '';
-
 function showPaymentScreen(token) {
     paymentToken = token;
     const screen = document.getElementById('payment-screen');
     if (!screen) return;
     screen.style.display = 'flex';
     screen.style.flexDirection = 'column';
-    document.getElementById('payment-loading').style.display = 'flex';
-    document.getElementById('payment-content').style.display = 'none';
-    document.getElementById('payment-error').style.display = 'none';
-    fetchAndRenderPayment(token);
+    const cpfForm = document.getElementById('payment-cpf-form');
+    if (cpfForm) cpfForm.style.display = 'block';
+    const loadingEl = document.getElementById('payment-loading');
+    if (loadingEl) loadingEl.style.display = 'none';
+    const contentEl = document.getElementById('payment-content');
+    if (contentEl) contentEl.style.display = 'none';
+    const errEl = document.getElementById('payment-error');
+    if (errEl) errEl.style.display = 'none';
+    const cpfInput = document.getElementById('payment-cpf');
+    if (cpfInput) { cpfInput.value = ''; setTimeout(function() { cpfInput.focus(); }, 100); }
 }
 
-async function fetchAndRenderPayment(token) {
+function submitPaymentCpf() {
+    const cpfInput = document.getElementById('payment-cpf');
+    if (!cpfInput) return;
+    const cpf = cpfInput.value.replace(/\D/g, '');
+    if (!cpf || cpf.length !== 11) {
+        alert('Informe o CPF completo (11 dígitos).');
+        cpfInput.focus();
+        return;
+    }
+    const cpfForm = document.getElementById('payment-cpf-form');
+    if (cpfForm) cpfForm.style.display = 'none';
+    const loadingEl = document.getElementById('payment-loading');
+    if (loadingEl) loadingEl.style.display = 'flex';
+    fetchAndRenderPayment(paymentToken, cpf);
+}
+
+async function fetchAndRenderPayment(token, cpf) {
     try {
         const resp = await fetch('/api/payment/create', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token })
+            body: JSON.stringify({ token: token, cpf: cpf })
         });
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.error || 'Erro ao gerar cobrança PIX');
         renderPaymentContent(data);
     } catch (e) {
-        document.getElementById('payment-loading').style.display = 'none';
-        document.getElementById('payment-error-msg').textContent = e.message;
-        document.getElementById('payment-error').style.display = 'block';
+        const loadingEl = document.getElementById('payment-loading');
+        if (loadingEl) loadingEl.style.display = 'none';
+        const msgEl = document.getElementById('payment-error-msg');
+        if (msgEl) msgEl.textContent = e.message;
+        const errEl = document.getElementById('payment-error');
+        if (errEl) errEl.style.display = 'block';
     }
 }
 
 function renderPaymentContent(data) {
-    document.getElementById('payment-loading').style.display = 'none';
-
+    const loadingEl = document.getElementById('payment-loading');
+    if (loadingEl) loadingEl.style.display = 'none';
     const value = typeof data.value === 'number'
         ? data.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-        : `R$ ${data.value}`;
-    document.getElementById('payment-value').textContent = value;
-
+        : 'R$ ' + data.value;
+    const valEl = document.getElementById('payment-value');
+    if (valEl) valEl.textContent = value;
     if (data.dueDate) {
-        const [y, m, d] = data.dueDate.split('-');
-        document.getElementById('payment-due').textContent = `Válido até ${d}/${m}/${y}`;
+        const parts = data.dueDate.split('-');
+        const dueEl = document.getElementById('payment-due');
+        if (dueEl) dueEl.textContent = 'Válido até ' + parts[2] + '/' + parts[1] + '/' + parts[0];
     }
-
-    if (data.pix?.qrCodeImage) {
-        document.getElementById('payment-qr-img').src = `data:image/png;base64,${data.pix.qrCodeImage}`;
+    if (data.pix && data.pix.qrCodeImage) {
+        const qrImg = document.getElementById('payment-qr-img');
+        if (qrImg) qrImg.src = 'data:image/png;base64,' + data.pix.qrCodeImage;
     }
-
-    pixCopyPasteCode = data.pix?.copyPaste || '';
+    pixCopyPasteCode = (data.pix && data.pix.copyPaste) ? data.pix.copyPaste : '';
     const codeEl = document.getElementById('payment-pix-code');
-    codeEl.textContent = pixCopyPasteCode.length > 40
-        ? pixCopyPasteCode.substring(0, 40) + '…'
-        : pixCopyPasteCode;
-
-    document.getElementById('payment-content').style.display = 'block';
+    if (codeEl) codeEl.textContent = pixCopyPasteCode.length > 40 ? pixCopyPasteCode.substring(0, 40) + '…' : pixCopyPasteCode;
+    const contentEl = document.getElementById('payment-content');
+    if (contentEl) contentEl.style.display = 'block';
 }
 
 function copyPaymentPixCode() {
     if (!pixCopyPasteCode) return;
-    navigator.clipboard.writeText(pixCopyPasteCode)
-        .then(() => alert('Código PIX copiado! Cole no seu banco para pagar.'))
-        .catch(() => {
-            const el = document.createElement('textarea');
-            el.value = pixCopyPasteCode;
-            document.body.appendChild(el);
-            el.select();
-            document.execCommand('copy');
-            document.body.removeChild(el);
-            alert('Código PIX copiado!');
-        });
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(pixCopyPasteCode)
+            .then(function() { alert('Código PIX copiado! Cole no seu banco para pagar.'); })
+            .catch(function() { _fallbackCopyPix(); });
+    } else {
+        _fallbackCopyPix();
+    }
 }
 
-// Route detection on load
-document.addEventListener('DOMContentLoaded', () => {
-    detectRoute();
-});
+function _fallbackCopyPix() {
+    var el = document.createElement('textarea');
+    el.value = pixCopyPasteCode;
+    document.body.appendChild(el);
+    el.select();
+    document.execCommand('copy');
+    document.body.removeChild(el);
+    alert('Código PIX copiado!');
+}
+
+document.addEventListener('DOMContentLoaded', function() { detectRoute(); });

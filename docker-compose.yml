@@ -1,4 +1,18 @@
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: magic_music_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${MAGIC_MUSIC_DB_NAME}
+      POSTGRES_USER: ${MAGIC_MUSIC_DB_USER}
+      POSTGRES_PASSWORD: ${MAGIC_MUSIC_DB_PASSWORD}
+    volumes:
+      - magic_music_pgdata:/var/lib/postgresql/data
+      - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - magic_music_net
+
   web:
     build:
       context: .
@@ -12,13 +26,18 @@ services:
     ports:
       - "127.0.0.1:${APP_PORT:-8095}:${PORT:-3000}"
     volumes:
-      - ./db.json:/app/db.json
       - ./storage:/app/storage
       - ./logs:/app/logs
       - ./backups:/app/backups
+    depends_on:
+      - db
     networks:
       - magic_music_net
       - proxy_net
+
+volumes:
+  magic_music_pgdata:
+    name: magic_music_pgdata
 
 networks:
   magic_music_net:

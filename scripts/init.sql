@@ -1,0 +1,36 @@
+-- Magic Music — Schema inicial PostgreSQL
+-- Este arquivo é executado automaticamente na primeira inicialização do container.
+
+CREATE TABLE IF NOT EXISTS songs (
+    id                      SERIAL PRIMARY KEY,
+    title                   TEXT NOT NULL,
+    artist                  TEXT NOT NULL DEFAULT 'Magic Music AI',
+    language                TEXT NOT NULL DEFAULT 'Geral',
+    category                TEXT NOT NULL DEFAULT 'Pop',
+    cover_color_hex         TEXT NOT NULL DEFAULT '0xFFF43F5E',
+    original_lyrics         TEXT NOT NULL DEFAULT '',
+    translated_lyrics       TEXT NOT NULL DEFAULT '',
+    romanization            TEXT NOT NULL DEFAULT '',
+    duration_seconds        INTEGER NOT NULL DEFAULT 120,
+    suno_prompt             TEXT NOT NULL DEFAULT '',
+    customer_name           TEXT NOT NULL DEFAULT '',
+    customer_whatsapp       TEXT NOT NULL DEFAULT '',
+    customer_cpf            TEXT NOT NULL DEFAULT '',
+    customer_email          TEXT NOT NULL DEFAULT '',
+    customer_notes          TEXT NOT NULL DEFAULT '',
+    audio_url               TEXT,
+    preview_url             TEXT,
+    cover_url               TEXT,
+    status                  TEXT NOT NULL DEFAULT 'pending_audio',
+    approval_token          TEXT UNIQUE,
+    payment_status          TEXT,
+    payment_provider        TEXT,
+    pix_transaction_id      TEXT,
+    paid_at                 TIMESTAMPTZ,
+    delivered_at            TIMESTAMPTZ,
+    adjustment_history      JSONB NOT NULL DEFAULT '[]',
+    is_favorite             BOOLEAN NOT NULL DEFAULT false,
+    is_purchased            BOOLEAN NOT NULL DEFAULT false,
+    production_notified_at  TIMESTAMPTZ,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
