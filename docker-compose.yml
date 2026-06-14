@@ -13,6 +13,9 @@ services:
       - "127.0.0.1:${APP_PORT:-8095}:${PORT:-3000}"
     volumes:
       - ./db.json:/app/db.json
+      - ./storage:/app/storage
+      - ./logs:/app/logs
+      - ./backups:/app/backups
     networks:
       - magic_music_net
       - proxy_net

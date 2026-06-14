@@ -11,7 +11,7 @@
     <!-- Icons -->
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <!-- Style -->
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="/style.css">
 </head>
 <body>
     <div class="app-container">
@@ -200,6 +200,10 @@
                     <div class="form-group">
                         <label for="customer-whatsapp">WhatsApp para entrega</label>
                         <input type="tel" id="customer-whatsapp" placeholder="Ex: (21) 99999-9999">
+                    </div>
+                    <div class="form-group">
+                        <label for="customer-cpf">CPF (obrigatório para pagamento PIX)</label>
+                        <input type="text" id="customer-cpf" placeholder="Ex: 000.000.000-00" maxlength="14" inputmode="numeric">
                     </div>
                     <div class="form-group">
                         <label for="customer-email">E-mail opcional</label>
@@ -491,6 +495,154 @@
         </div>
     </div>
 
-    <script src="app.js"></script>
+    <!-- APPROVAL SCREEN (route: /pedido/:token) -->
+    <div class="approval-screen" id="approval-screen" style="display:none;">
+        <div class="approval-header">
+            <div class="logo-area">
+                <span class="logo-light">Magic</span><span class="logo-pink">Music</span>
+            </div>
+        </div>
+        <div class="approval-body">
+            <div class="approval-loading" id="approval-loading">
+                <div class="spinner"></div>
+                <p class="text-gray" style="margin-top:12px;font-size:14px;">Carregando seu pedido…</p>
+            </div>
+            <div class="approval-content" id="approval-content" style="display:none;">
+                <div class="approval-badge">
+                    <i class="material-icons text-emerald" style="font-size:36px;">check_circle</i>
+                    <h2 class="text-white" style="margin-top:8px;">Sua música está pronta!</h2>
+                    <p class="text-gray" style="font-size:14px;margin-top:4px;">Ouça a prévia e nos diga o que achou.</p>
+                </div>
+
+                <div class="approval-song-card">
+                    <div class="approval-cover" id="approval-cover">
+                        <i class="material-icons">music_note</i>
+                    </div>
+                    <div class="approval-song-info">
+                        <h3 id="approval-title">—</h3>
+                        <p class="text-gray" id="approval-meta">—</p>
+                        <p class="text-gray" style="font-size:12px;" id="approval-date">—</p>
+                    </div>
+                </div>
+
+                <!-- Preview Player -->
+                <div class="approval-player" id="approval-player-wrap" style="display:none;">
+                    <audio id="approval-audio" preload="none"></audio>
+                    <div class="approval-player-bar">
+                        <button class="control-btn play-btn" id="approval-play-btn" onclick="toggleApprovalPlay()">
+                            <i class="material-icons" id="approval-play-icon">play_arrow</i>
+                        </button>
+                        <div class="slider-container" style="flex:1;">
+                            <input type="range" id="approval-progress" min="0" max="100" value="0" oninput="seekApprovalAudio(this.value)">
+                            <div class="slider-fill" id="approval-progress-fill"></div>
+                        </div>
+                        <span id="approval-time" style="font-size:12px;color:#a1a1aa;min-width:38px;text-align:right;">00:00</span>
+                    </div>
+                    <p class="text-amber" style="font-size:12px;text-align:center;margin-top:6px;" id="approval-preview-note">⏱ Prévia de 60 segundos</p>
+                </div>
+
+                <!-- No audio yet message -->
+                <div id="approval-no-preview" style="display:none;text-align:center;padding:16px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:10px;margin:12px 0;">
+                    <i class="material-icons text-amber">hourglass_top</i>
+                    <p style="font-size:13px;color:#f59e0b;margin-top:4px;">A prévia de áudio ainda não está disponível.</p>
+                </div>
+
+                <!-- Adjustment form -->
+                <div id="approval-adjust-form" style="display:none;margin-top:12px;">
+                    <div class="form-group">
+                        <label>Descreva o que precisa ser ajustado</label>
+                        <textarea id="approval-adjust-desc" rows="3" placeholder="Ex: quero o refrão mais empolgante, trocar o nome no verso 2..."></textarea>
+                    </div>
+                    <div class="wizard-actions row-flex" style="margin-top:10px;">
+                        <button class="btn btn-secondary" onclick="hideAdjustForm()">Cancelar</button>
+                        <button class="btn btn-amber" onclick="submitAdjustment()">Enviar Pedido de Ajuste</button>
+                    </div>
+                </div>
+
+                <!-- Action buttons -->
+                <div class="approval-actions" id="approval-actions">
+                    <button class="btn btn-success approval-btn" onclick="approveOrder()">
+                        <i class="material-icons">check_circle</i>
+                        Aprovar Música
+                    </button>
+                    <button class="btn btn-secondary approval-btn" onclick="showAdjustForm()">
+                        <i class="material-icons">tune</i>
+                        Solicitar Ajustes
+                    </button>
+                </div>
+            </div>
+
+            <!-- Approval sent states -->
+            <div class="approval-state-panel" id="approval-state-approved" style="display:none;">
+                <i class="material-icons" style="font-size:48px;color:#10b981;">celebration</i>
+                <h3 class="text-white" style="margin-top:12px;">Música Aprovada!</h3>
+                <p class="text-gray" style="font-size:14px;margin-top:8px;">Ótimo! O próximo passo é realizar o pagamento para liberar o download completo.</p>
+                <div style="margin-top:20px;padding:16px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.2);border-radius:12px;">
+                    <p style="font-size:13px;color:#10b981;font-weight:600;">Aguardando integração de pagamento</p>
+                    <p style="font-size:12px;color:#a1a1aa;margin-top:4px;">Em breve você receberá o link de pagamento via WhatsApp.</p>
+                </div>
+            </div>
+            <div class="approval-state-panel" id="approval-state-adjusted" style="display:none;">
+                <i class="material-icons" style="font-size:48px;color:#f59e0b;">pending</i>
+                <h3 class="text-white" style="margin-top:12px;">Ajuste Solicitado!</h3>
+                <p class="text-gray" style="font-size:14px;margin-top:8px;">Recebemos o seu pedido de ajuste. Nossa equipe irá revisar e enviar uma nova prévia em breve.</p>
+            </div>
+            <div class="approval-state-panel" id="approval-error" style="display:none;">
+                <i class="material-icons" style="font-size:48px;color:#ef4444;">error</i>
+                <h3 class="text-white" style="margin-top:12px;">Pedido não encontrado</h3>
+                <p class="text-gray" style="font-size:14px;margin-top:8px;">Verifique o link recebido ou entre em contato com nossa equipe.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- PAYMENT SCREEN (route: /pagamento/:token) -->
+    <div class="approval-screen" id="payment-screen" style="display:none;">
+        <div class="approval-header">
+            <div class="logo-area">
+                <span class="logo-light">Magic</span><span class="logo-pink">Music</span>
+            </div>
+        </div>
+        <div class="approval-body">
+            <div id="payment-loading" style="display:flex;flex-direction:column;align-items:center;padding:40px 0;">
+                <div class="spinner"></div>
+                <p style="margin-top:12px;font-size:14px;color:#a1a1aa;">Gerando cobrança PIX…</p>
+            </div>
+
+            <div id="payment-content" style="display:none;">
+                <div class="approval-badge">
+                    <i class="material-icons text-pink" style="font-size:40px;">pix</i>
+                    <h2 class="text-white" style="margin-top:8px;">Pague via PIX</h2>
+                    <p class="text-gray" style="font-size:14px;margin-top:4px;">Escaneie o QR Code ou copie o código abaixo.</p>
+                </div>
+
+                <div style="text-align:center;margin:8px 0 16px;">
+                    <span id="payment-value" style="font-size:30px;font-weight:800;color:#f43f5e;">R$ 0,00</span>
+                    <p id="payment-due" style="font-size:12px;color:#71717a;margin-top:4px;">—</p>
+                </div>
+
+                <div style="display:flex;justify-content:center;margin:16px 0;padding:16px;background:#fff;border-radius:12px;">
+                    <img id="payment-qr-img" src="" alt="QR Code PIX" style="width:200px;height:200px;display:block;">
+                </div>
+
+                <p style="font-size:13px;color:#a1a1aa;text-align:center;margin-bottom:8px;">Ou copie o código PIX:</p>
+                <div class="pix-copy-box" onclick="copyPaymentPixCode()">
+                    <span class="pix-code-text" id="payment-pix-code">—</span>
+                    <i class="material-icons text-amber">content_copy</i>
+                </div>
+
+                <p style="font-size:12px;color:#71717a;text-align:center;margin-top:20px;line-height:1.5;">
+                    O download será liberado automaticamente após a confirmação do pagamento.
+                </p>
+            </div>
+
+            <div id="payment-error" style="display:none;text-align:center;padding:40px 16px;">
+                <i class="material-icons" style="font-size:48px;color:#ef4444;">error</i>
+                <h3 style="color:#fff;margin-top:12px;">Não foi possível gerar a cobrança</h3>
+                <p id="payment-error-msg" style="font-size:14px;color:#a1a1aa;margin-top:8px;">Verifique o link ou entre em contato.</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="/app.js"></script>
 </body>
 </html>

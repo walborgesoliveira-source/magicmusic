@@ -1472,3 +1472,127 @@ input[type="text"]:focus, input[type="email"]:focus, input[type="tel"]:focus, te
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
 }
+
+/* ==================== APPROVAL SCREEN (v2.0) ==================== */
+
+.approval-screen {
+    position: fixed;
+    inset: 0;
+    background: var(--space-black);
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    max-width: 500px;
+    margin: 0 auto;
+    overflow-y: auto;
+}
+
+.approval-header {
+    height: 60px;
+    padding: 0 20px;
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid var(--dark-accent-border);
+    background: rgba(9, 13, 22, 0.9);
+    position: sticky;
+    top: 0;
+    z-index: 2;
+}
+
+.approval-body {
+    padding: 20px 16px 40px;
+    flex: 1;
+}
+
+.approval-badge {
+    text-align: center;
+    padding: 20px 0 16px;
+}
+
+.approval-song-card {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    background: var(--deep-space-card);
+    border: 1px solid var(--dark-accent-border);
+    border-radius: var(--border-radius-md);
+    padding: 14px;
+    margin: 12px 0;
+}
+
+.approval-cover {
+    width: 60px;
+    height: 60px;
+    border-radius: var(--border-radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 28px;
+    background: var(--neon-pink);
+    color: #fff;
+}
+
+.approval-song-info h3 {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--clear-white);
+}
+
+.approval-player {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid var(--dark-accent-border);
+    border-radius: var(--border-radius-md);
+    padding: 14px;
+    margin: 12px 0;
+}
+
+.approval-player-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.approval-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+.approval-btn {
+    width: 100%;
+    justify-content: center;
+    gap: 6px;
+    font-size: 15px;
+    padding: 14px;
+}
+
+.approval-state-panel {
+    text-align: center;
+    padding: 40px 16px;
+}
+
+/* Status badges for admin panel v2.0 */
+.status-badge {
+    display: inline-block;
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-weight: 600;
+}
+.status-badge.pending-audio    { background: rgba(245,158,11,0.12); color: #f59e0b; }
+.status-badge.preview-ready    { background: rgba(99,102,241,0.12); color: #818cf8; }
+.status-badge.adjustment       { background: rgba(239,68,68,0.12);  color: #f87171; }
+.status-badge.awaiting-payment { background: rgba(16,185,129,0.12); color: #34d399; }
+.status-badge.paid             { background: rgba(16,185,129,0.2);  color: #10b981; }
+.status-badge.delivered        { background: rgba(16,185,129,0.3);  color: #10b981; }
+.status-badge.cancelled        { background: rgba(255,255,255,0.06); color: #71717a; }
+
+/* Client area new statuses */
+.client-status.preview-ready    { background: rgba(99,102,241,0.12); color: #818cf8; }
+.client-status.awaiting-payment { background: rgba(16,185,129,0.12); color: #34d399; }
+.client-status.paid             { background: rgba(16,185,129,0.2);  color: #10b981; }
+.client-status.delivered        { background: rgba(16,185,129,0.3);  color: #10b981; }
+.client-status.adjustment       { background: rgba(245,158,11,0.12); color: #f59e0b; }
+.client-status.cancelled        { background: rgba(255,255,255,0.06); color: #71717a; }

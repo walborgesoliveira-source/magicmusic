@@ -589,6 +589,8 @@ window.addEventListener("DOMContentLoaded", async () => {
         });
     }
 
+    setupCpfMask();
+
     // Sync with backend server
     await syncSongsWithServer();
 });
@@ -647,11 +649,20 @@ function updateCreditsUI() {
 function setupClientLookupListener() {
     const input = document.getElementById("client-contact");
     if (!input) return;
-
     input.addEventListener("keydown", (event) => {
-        if (event.key === "Enter") {
-            lookupClientSongs();
-        }
+        if (event.key === "Enter") lookupClientSongs();
+    });
+}
+
+function setupCpfMask() {
+    const cpfInput = document.getElementById("customer-cpf");
+    if (!cpfInput) return;
+    cpfInput.addEventListener("input", () => {
+        let v = cpfInput.value.replace(/\D/g, '').substring(0, 11);
+        if (v.length > 9) v = v.replace(/(\d{3})(\d{3})(\d{3})(\d{1,2})/, '$1.$2.$3-$4');
+        else if (v.length > 6) v = v.replace(/(\d{3})(\d{3})(\d{1,3})/, '$1.$2.$3');
+        else if (v.length > 3) v = v.replace(/(\d{3})(\d{1,3})/, '$1.$2');
+        cpfInput.value = v;
     });
 }
 
@@ -683,6 +694,7 @@ function resetWizard() {
     document.getElementById("key-stories").value = "";
     document.getElementById("customer-name").value = "";
     document.getElementById("customer-whatsapp").value = "";
+    document.getElementById("customer-cpf").value = "";
     document.getElementById("customer-email").value = "";
     document.getElementById("customer-notes").value = "";
     document.querySelectorAll("#vibe-chips .chip").forEach(el => {
@@ -697,12 +709,6 @@ async function draftLyricsWithAI() {
     const name = document.getElementById("recipient-name").value.trim();
     if (!name) {
         alert("Por favor, insira o nome da pessoa!");
-        return;
-    }
-    
-    if (credits <= 0) {
-        alert("Você está sem créditos! Adquira mais na Loja.");
-        switchTab("shop");
         return;
     }
     
@@ -765,11 +771,16 @@ async function finalizeProduction() {
     const finalLyrics = document.getElementById("draft-lyrics").value;
     const customerName = document.getElementById("customer-name").value.trim();
     const customerWhatsapp = document.getElementById("customer-whatsapp").value.trim();
+    const customerCpf = document.getElementById("customer-cpf").value.replace(/\D/g, '');
     const customerEmail = document.getElementById("customer-email").value.trim();
     const customerNotes = document.getElementById("customer-notes").value.trim();
 
     if (!customerWhatsapp) {
         alert("Informe o WhatsApp para a equipe entregar o MP3 final.");
+        return;
+    }
+    if (!customerCpf || customerCpf.length !== 11) {
+        alert("Informe o CPF completo (obrigatório para o pagamento PIX).");
         return;
     }
     
@@ -778,16 +789,12 @@ async function finalizeProduction() {
     wizardDraftSong.originalLyrics = finalLyrics;
     wizardDraftSong.customerName = customerName;
     wizardDraftSong.customerWhatsapp = customerWhatsapp;
+    wizardDraftSong.customerCpf = customerCpf;
     wizardDraftSong.customerEmail = customerEmail;
     wizardDraftSong.customerNotes = customerNotes;
     
     openModal("production-modal");
-    
-    // Deduct credits locally
-    credits = Math.max(0, credits - 1);
-    AppDB.saveCredits(credits);
-    updateCreditsUI();
-    
+
     // Check if it's a server-created song (has a backend DB link)
     const isServerBacked = Boolean(wizardDraftSong.createdAt);
 
@@ -804,6 +811,7 @@ async function finalizeProduction() {
                     originalLyrics: finalLyrics,
                     customerName,
                     customerWhatsapp,
+                    customerCpf,
                     customerEmail,
                     customerNotes
                 })
@@ -1486,13 +1494,20 @@ function openClientSong(songId) {
 
 function downloadClientSong(songId) {
     const song = clientSongs.find(item => item.id === songId);
-    if (!song || song.status !== "ready" || !song.audioUrl) {
+    if (!song || !isSongDelivered(song)) {
         alert("O MP3 final ainda não está disponível.");
         return;
     }
 
+    // v2.0: usa /api/download/:token; legado usa audioUrl direto
+    const href = song.approvalToken
+        ? `/api/download/${song.approvalToken}`
+        : song.audioUrl;
+
+    if (!href) { alert("Arquivo não encontrado."); return; }
+
     const link = document.createElement("a");
-    link.href = song.audioUrl;
+    link.href = href;
     link.download = `${song.title}.mp3`;
     link.target = "_blank";
     document.body.appendChild(link);
@@ -1738,6 +1753,598 @@ function openSongPurchaseCheckout(song) {
             playSong();
         }
     };
-    
+
     openModal("pix-modal");
 }
+
+// =====================================================================
+// MAGIC MUSIC v2.0 — APPROVAL SCREEN & NEW STATUS LOGIC
+// =====================================================================
+
+let approvalToken = null;
+let approvalAudioEl = null;
+let approvalPlaying = false;
+
+// --- Route detection ---
+function detectRoute() {
+    const routePath = window.location.pathname;
+    if (routePath.startsWith('/pedido/')) {
+        const token = routePath.replace('/pedido/', '').split('/')[0];
+        if (token) { showApprovalScreen(token); return true; }
+    }
+    if (routePath.startsWith('/pagamento/')) {
+        const token = routePath.replace('/pagamento/', '').split('/')[0];
+        if (token) { showPaymentScreen(token); return true; }
+    }
+    return false;
+}
+
+function showApprovalScreen(token) {
+    approvalToken = token;
+    const screen = document.getElementById('approval-screen');
+    if (!screen) return;
+    screen.style.display = 'flex';
+    screen.style.flexDirection = 'column';
+    document.getElementById('approval-loading').style.display = 'flex';
+    document.getElementById('approval-loading').style.flexDirection = 'column';
+    document.getElementById('approval-loading').style.alignItems = 'center';
+    document.getElementById('approval-content').style.display = 'none';
+    document.getElementById('approval-error').style.display = 'none';
+    fetchApprovalOrder(token);
+}
+
+async function fetchApprovalOrder(token) {
+    try {
+        const resp = await fetch(`/api/order/${token}`);
+        if (!resp.ok) throw new Error('not_found');
+        const song = await resp.json();
+        renderApprovalContent(song);
+    } catch (_) {
+        document.getElementById('approval-loading').style.display = 'none';
+        document.getElementById('approval-error').style.display = 'block';
+    }
+}
+
+function renderApprovalContent(song) {
+    document.getElementById('approval-loading').style.display = 'none';
+
+    const color = (song.coverColorHex || '0xFFF43F5E').replace('0xFF', '#');
+    document.getElementById('approval-cover').style.background = color;
+    document.getElementById('approval-title').textContent = song.title || '—';
+    document.getElementById('approval-meta').textContent = `${song.language || '—'} · ${song.category || '—'}`;
+    document.getElementById('approval-date').textContent = song.createdAt
+        ? `Pedido em ${new Date(song.createdAt).toLocaleDateString('pt-BR')}`
+        : '';
+
+    if (song.status === 'awaiting_payment') {
+        window.location.href = `/pagamento/${song.approvalToken}`;
+        return;
+    }
+    if (song.status === 'adjustment_requested') {
+        document.getElementById('approval-state-adjusted').style.display = 'block';
+        return;
+    }
+
+    document.getElementById('approval-content').style.display = 'block';
+
+    if (song.previewUrl) {
+        const player = document.getElementById('approval-player-wrap');
+        player.style.display = 'block';
+        approvalAudioEl = document.getElementById('approval-audio');
+        approvalAudioEl.src = song.previewUrl;
+        approvalAudioEl.addEventListener('timeupdate', updateApprovalProgress);
+        approvalAudioEl.addEventListener('ended', () => {
+            approvalPlaying = false;
+            document.getElementById('approval-play-icon').textContent = 'play_arrow';
+        });
+    } else {
+        document.getElementById('approval-no-preview').style.display = 'block';
+    }
+
+    if (['paid', 'delivered', 'cancelled'].includes(song.status)) {
+        document.getElementById('approval-actions').style.display = 'none';
+    }
+}
+
+function toggleApprovalPlay() {
+    if (!approvalAudioEl) return;
+    if (approvalPlaying) {
+        approvalAudioEl.pause();
+        approvalPlaying = false;
+        document.getElementById('approval-play-icon').textContent = 'play_arrow';
+    } else {
+        approvalAudioEl.play();
+        approvalPlaying = true;
+        document.getElementById('approval-play-icon').textContent = 'pause';
+    }
+}
+
+function updateApprovalProgress() {
+    if (!approvalAudioEl || !approvalAudioEl.duration) return;
+    const pct = (approvalAudioEl.currentTime / approvalAudioEl.duration) * 100;
+    document.getElementById('approval-progress').value = pct;
+    document.getElementById('approval-progress-fill').style.width = pct + '%';
+    const m = Math.floor(approvalAudioEl.currentTime / 60);
+    const s = Math.floor(approvalAudioEl.currentTime % 60);
+    document.getElementById('approval-time').textContent = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+
+function seekApprovalAudio(value) {
+    if (!approvalAudioEl || !approvalAudioEl.duration) return;
+    approvalAudioEl.currentTime = (value / 100) * approvalAudioEl.duration;
+}
+
+function showAdjustForm() {
+    document.getElementById('approval-actions').style.display = 'none';
+    document.getElementById('approval-adjust-form').style.display = 'block';
+}
+
+function hideAdjustForm() {
+    document.getElementById('approval-adjust-form').style.display = 'none';
+    document.getElementById('approval-actions').style.display = 'flex';
+}
+
+async function approveOrder() {
+    if (!approvalToken) return;
+    try {
+        const resp = await fetch('/api/order/approve', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: approvalToken })
+        });
+        if (!resp.ok) throw new Error('error');
+        if (approvalAudioEl) approvalAudioEl.pause();
+        window.location.href = `/pagamento/${approvalToken}`;
+    } catch (_) {
+        alert('Não foi possível aprovar o pedido. Tente novamente.');
+    }
+}
+
+async function submitAdjustment() {
+    const desc = document.getElementById('approval-adjust-desc').value.trim();
+    if (!desc) { alert('Descreva o ajuste desejado.'); return; }
+    if (!approvalToken) return;
+    try {
+        const resp = await fetch('/api/order/request-adjustment', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: approvalToken, description: desc })
+        });
+        if (!resp.ok) throw new Error('error');
+        document.getElementById('approval-content').style.display = 'none';
+        document.getElementById('approval-adjust-form').style.display = 'none';
+        document.getElementById('approval-state-adjusted').style.display = 'block';
+        if (approvalAudioEl) approvalAudioEl.pause();
+    } catch (_) {
+        alert('Não foi possível enviar o ajuste. Tente novamente.');
+    }
+}
+
+// ---- Updated renderClientArea with v2.0 status support ----
+const STATUS_LABEL_MAP = {
+    pending_audio:        { label: 'Em produção',          cls: 'pending' },
+    preview_ready:        { label: 'Prévia disponível',    cls: 'preview-ready' },
+    adjustment_requested: { label: 'Ajuste solicitado',   cls: 'adjustment' },
+    awaiting_payment:     { label: 'Aguardando pagamento', cls: 'awaiting-payment' },
+    paid:                 { label: 'Pago',                 cls: 'paid' },
+    delivered:            { label: 'Entregue',             cls: 'delivered' },
+    ready:                { label: 'Pronta',               cls: 'ready' },
+    cancelled:            { label: 'Cancelado',            cls: 'cancelled' },
+    draft:                { label: 'Rascunho',             cls: 'pending' }
+};
+
+function getStatusInfo(song) {
+    return STATUS_LABEL_MAP[song.status] || { label: song.status, cls: 'pending' };
+}
+
+function isSongDelivered(song) {
+    return song.status === 'delivered' || song.status === 'paid' || (song.status === 'ready' && Boolean(song.audioUrl));
+}
+
+function renderClientArea() {
+    const container = document.getElementById("client-results");
+    if (!container) return;
+
+    if (!Array.isArray(clientSongs) || clientSongs.length === 0) {
+        const initialTitle = clientLookupPerformed ? "Nenhum pedido encontrado" : "Entre com seu contato";
+        const initialText = clientLookupPerformed
+            ? "Digite o mesmo WhatsApp ou e-mail usado quando a música foi enviada para produção."
+            : "Use o mesmo WhatsApp ou e-mail informado na criação da música.";
+        const initialIcon = clientLookupPerformed ? "manage_search" : "account_circle";
+        container.innerHTML = `
+            <div class="client-empty-state">
+                <i class="material-icons">${initialIcon}</i>
+                <h4>${initialTitle}</h4>
+                <p>${initialText}</p>
+            </div>`;
+        return;
+    }
+
+    container.innerHTML = "";
+    clientSongs
+        .slice()
+        .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+        .forEach(song => {
+            const card = document.createElement("div");
+            const delivered = isSongDelivered(song);
+            const statusInfo = getStatusInfo(song);
+            const color = (song.coverColorHex || "0xFFF43F5E").replace("0xFF", "#");
+            const safeTitle = escapeHtml(song.title);
+            const safeCategory = escapeHtml(song.category);
+            const safeOccasion = escapeHtml(song.language);
+            const safeDate = song.createdAt ? new Date(song.createdAt).toLocaleDateString("pt-BR") : "-";
+            const hasPreview = song.status === 'preview_ready' || song.status === 'adjustment_requested';
+            const awaitingPayment = song.status === 'awaiting_payment' && song.approvalToken;
+            const approvalLink = song.approvalToken ? `/pedido/${song.approvalToken}` : null;
+            const paymentLink = song.approvalToken ? `/pagamento/${song.approvalToken}` : null;
+
+            let bodyText = "A equipe recebeu a letra e está produzindo o áudio final.";
+            if (song.status === 'preview_ready') bodyText = "Sua prévia está pronta! Ouça e aprove para avançar.";
+            else if (song.status === 'adjustment_requested') bodyText = "Ajuste solicitado. Nossa equipe está revisando e enviará nova prévia em breve.";
+            else if (song.status === 'awaiting_payment') bodyText = "Prévia aprovada! Realize o pagamento para liberar o download completo.";
+            else if (delivered) bodyText = "Seu MP3 final está liberado para ouvir e baixar!";
+
+            let primaryAction;
+            if (awaitingPayment) {
+                primaryAction = `<a class="btn btn-pink" href="${paymentLink}" style="text-decoration:none;display:flex;align-items:center;gap:4px;">
+                    <i class="material-icons">pix</i> Pagar agora
+                </a>`;
+            } else if (hasPreview && approvalLink) {
+                primaryAction = `<a class="btn btn-primary" href="${approvalLink}" style="text-decoration:none;display:flex;align-items:center;gap:4px;">
+                    <i class="material-icons">play_circle</i> Ouvir e Aprovar
+                </a>`;
+            } else {
+                primaryAction = `<button class="btn btn-secondary" onclick="openClientSong(${song.id})">
+                    <i class="material-icons">${delivered ? 'play_arrow' : 'lyrics'}</i>
+                    ${delivered ? 'Ouvir' : 'Ver letra'}
+                </button>`;
+            }
+
+            card.className = "client-song-card";
+            card.innerHTML = `
+                <div class="client-song-top">
+                    <div class="client-cover" style="background-color:${color}"><i class="material-icons">music_note</i></div>
+                    <div class="client-song-info">
+                        <h4>${safeTitle}</h4>
+                        <p>${safeOccasion} · ${safeCategory}</p>
+                        <span>Pedido em ${safeDate}</span>
+                    </div>
+                    <span class="client-status ${statusInfo.cls}">${statusInfo.label}</span>
+                </div>
+                <div class="client-song-body"><p>${bodyText}</p></div>
+                <div class="client-song-actions">
+                    ${primaryAction}
+                    <button class="btn btn-success" ${delivered ? "" : "disabled"} onclick="downloadClientSong(${song.id})">
+                        <i class="material-icons">download</i> Baixar MP3
+                    </button>
+                </div>`;
+            container.appendChild(card);
+        });
+}
+
+// ---- Updated submitAudioUrl with v2.0 feedback ----
+async function submitAudioUrl(songId) {
+    const audioUrl = document.getElementById(`audio-input-${songId}`).value.trim();
+    if (!audioUrl) { alert("Cole a URL do áudio primeiro!"); return; }
+
+    const btn = document.querySelector(`[onclick="submitAudioUrl(${songId})"]`);
+    if (btn) { btn.disabled = true; btn.textContent = "Processando…"; }
+
+    try {
+        const response = await fetch("/api/admin/submit-audio", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...getAdminHeaders() },
+            body: JSON.stringify({ songId, audioUrl })
+        });
+        const data = await response.json();
+        if (response.ok) {
+            const msg = data.previewGenerated
+                ? `✅ Prévia gerada com sucesso!\n\nLink de aprovação para o cliente:\n${data.approvalUrl}`
+                : `⚠️ Prévia sem FFmpeg (link externo usado).\n\nLink de aprovação:\n${data.approvalUrl}`;
+            alert(msg);
+            await syncSongsWithServer();
+            renderAdminPendingList();
+        } else {
+            alert("Falha: " + (data.error || "Verifique a conexão."));
+            if (btn) { btn.disabled = false; btn.textContent = "Gerar Prévia"; }
+        }
+    } catch (e) {
+        console.error(e);
+        alert("Erro de rede ao salvar.");
+        if (btn) { btn.disabled = false; btn.textContent = "Gerar Prévia"; }
+    }
+}
+
+// ---- Admin panel: show all statuses ----
+function adminStatusBadge(status) {
+    const map = {
+        pending_audio:        ['pending-audio',    'Aguardando Suno'],
+        adjustment_requested: ['adjustment',       'Ajuste Solicitado'],
+        preview_ready:        ['preview-ready',    'Aguardando Aprovação'],
+        awaiting_payment:     ['awaiting-payment', 'Aguardando Pagamento'],
+        paid:                 ['paid',             'Pago'],
+        delivered:            ['delivered',        'Entregue'],
+        ready:                ['paid',             'Pronto (legado)'],
+        cancelled:            ['cancelled',        'Cancelado'],
+        draft:                ['cancelled',        'Rascunho']
+    };
+    const [cls, label] = map[status] || ['cancelled', status];
+    return `<span class="status-badge ${cls}">${label}</span>`;
+}
+
+async function renderAdminPendingList() {
+    const container = document.getElementById("admin-pending-list");
+    if (!container) return;
+
+    container.innerHTML = `<div style="color:#a1a1aa;padding:20px;text-align:center;font-size:14px;">Carregando pedidos…</div>`;
+
+    try {
+        const response = await fetch("/api/admin/orders", { headers: getAdminHeaders() });
+        if (response.status === 401) {
+            adminModeActive = false; adminSessionPassword = "";
+            document.querySelector('.btn-admin-trigger').style.color = '#a1a1aa';
+            switchTab("library");
+            alert("Sessão administrativa expirada ou senha inválida.");
+            return;
+        }
+        if (!response.ok) throw new Error("Server error");
+        const allOrders = await response.json();
+
+        if (allOrders.length === 0) {
+            container.innerHTML = `
+                <div style="text-align:center;color:#a1a1aa;padding:30px;border:1px dashed rgba(255,255,255,0.1);border-radius:8px;">
+                    <i class="material-icons" style="font-size:40px;color:#10b981;margin-bottom:10px;">check_circle</i>
+                    <h4 style="color:#fff;margin-bottom:5px;">Nenhum pedido ainda.</h4>
+                </div>`;
+            return;
+        }
+
+        const actionNeeded = allOrders.filter(s => ['pending_audio', 'adjustment_requested'].includes(s.status));
+        const others = allOrders.filter(s => !['pending_audio', 'adjustment_requested'].includes(s.status));
+
+        container.innerHTML = "";
+
+        if (actionNeeded.length > 0) {
+            const lbl = document.createElement('p');
+            lbl.style = "font-size:11px;color:#f59e0b;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;font-weight:700;";
+            lbl.textContent = "⚡ Ação Necessária";
+            container.appendChild(lbl);
+            actionNeeded.forEach(song => container.appendChild(buildAdminCard(song, true)));
+        }
+
+        if (others.length > 0) {
+            const lbl = document.createElement('p');
+            lbl.style = "font-size:11px;color:#a1a1aa;text-transform:uppercase;letter-spacing:1px;margin:16px 0 10px;font-weight:700;";
+            lbl.textContent = "Histórico";
+            container.appendChild(lbl);
+            others.forEach(song => container.appendChild(buildAdminCard(song, false)));
+        }
+
+    } catch (e) {
+        console.error(e);
+        container.innerHTML = `<div style="color:#ef4444;padding:20px;text-align:center;font-size:14px;">Erro ao carregar do servidor.</div>`;
+    }
+}
+
+function buildAdminCard(song, showAudioInput) {
+    const card = document.createElement("div");
+    const recipient = song.artist?.split('&')[1]?.trim() || "Desconhecido";
+    const safeTitle = escapeHtml(song.title);
+    const safeCategory = escapeHtml(song.category);
+    const safeRecipient = escapeHtml(recipient);
+    const safeSunoPrompt = escapeHtml(song.sunoPrompt || "");
+    const safeLyrics = escapeHtml(song.originalLyrics || "");
+    const safeCustomerName = escapeHtml(song.customerName || "-");
+    const safeCustomerWhatsapp = escapeHtml(song.customerWhatsapp || "-");
+    const safeCustomerEmail = escapeHtml(song.customerEmail || "-");
+    const safeCustomerNotes = escapeHtml(song.customerNotes || "-");
+    const safeDate = song.createdAt ? new Date(song.createdAt).toLocaleDateString("pt-BR") : "-";
+    const approvalLink = song.approvalToken ? `/pedido/${song.approvalToken}` : null;
+
+    let adjustHistory = "";
+    if (Array.isArray(song.adjustmentHistory) && song.adjustmentHistory.length > 0) {
+        const items = song.adjustmentHistory.map(a =>
+            `<p style="font-size:12px;color:#fbbf24;margin-top:4px;">• ${escapeHtml(a.description)} <span style="color:#71717a;">(${a.requestedAt ? new Date(a.requestedAt).toLocaleDateString('pt-BR') : '-'})</span></p>`
+        ).join('');
+        adjustHistory = `<div style="margin-bottom:10px;padding:10px;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.15);border-radius:6px;">
+            <p style="font-size:12px;color:#d4d4d8;margin-bottom:4px;"><strong>Histórico de Ajustes</strong></p>${items}</div>`;
+    }
+
+    card.className = "pending-admin-card";
+    card.style = "background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.05);padding:15px;border-radius:8px;margin-bottom:12px;";
+    card.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:1px solid rgba(255,255,255,0.05);padding-bottom:8px;margin-bottom:10px;">
+            <div>
+                <h4 style="color:#fff;font-size:15px;">${safeTitle}</h4>
+                <p style="font-size:12px;color:#a1a1aa;">Estilo: <strong>${safeCategory}</strong> | Para: <strong>${safeRecipient}</strong> | ${safeDate}</p>
+            </div>
+            ${adminStatusBadge(song.status)}
+        </div>
+        <div style="margin-bottom:12px;background:rgba(16,185,129,0.06);border:1px solid rgba(16,185,129,0.12);border-radius:6px;padding:10px;">
+            <p style="font-size:12px;color:#d4d4d8;margin-bottom:6px;"><strong>Contato</strong></p>
+            <p style="font-size:12px;color:#a1a1aa;line-height:1.6;">
+                Nome: <strong style="color:#fff;">${safeCustomerName}</strong> |
+                WhatsApp: <strong style="color:#fff;">${safeCustomerWhatsapp}</strong> |
+                E-mail: <strong style="color:#fff;">${safeCustomerEmail}</strong>
+                ${safeCustomerNotes !== '-' ? `<br>Obs.: <strong style="color:#fff;">${safeCustomerNotes}</strong>` : ''}
+            </p>
+        </div>
+        ${adjustHistory}
+        ${approvalLink ? `<div style="margin-bottom:10px;padding:8px 12px;background:rgba(99,102,241,0.08);border:1px solid rgba(99,102,241,0.15);border-radius:6px;font-size:12px;">
+            🔗 <a href="${approvalLink}" target="_blank" style="color:#818cf8;">${approvalLink}</a>
+        </div>` : ""}
+        ${showAudioInput ? `
+        <div style="margin-bottom:10px;">
+            <p style="font-size:12px;color:#a1a1aa;margin-bottom:4px;"><strong>Prompt do Suno:</strong></p>
+            <div style="display:flex;gap:8px;">
+                <input type="text" readonly value="${safeSunoPrompt}" id="suno-prompt-${song.id}" style="flex:1;background:#000;border:1px solid rgba(255,255,255,0.1);color:#fff;padding:4px 8px;font-size:12px;border-radius:4px;">
+                <button onclick="copyTextById('suno-prompt-${song.id}')" style="background:#27272a;border:none;color:#fff;padding:4px 10px;font-size:12px;border-radius:4px;cursor:pointer;">Copiar</button>
+            </div>
+        </div>
+        <div style="margin-bottom:12px;">
+            <p style="font-size:12px;color:#a1a1aa;margin-bottom:4px;"><strong>Letra Gerada:</strong></p>
+            <div style="display:flex;gap:8px;">
+                <textarea readonly id="suno-lyrics-${song.id}" style="flex:1;height:60px;background:#000;border:1px solid rgba(255,255,255,0.1);color:#fff;padding:4px 8px;font-size:11px;border-radius:4px;resize:none;font-family:monospace;">${safeLyrics}</textarea>
+                <button onclick="copyTextById('suno-lyrics-${song.id}')" style="background:#27272a;border:none;color:#fff;padding:4px 10px;font-size:12px;border-radius:4px;cursor:pointer;align-self:flex-start;">Copiar</button>
+            </div>
+        </div>
+        <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:12px;">
+            <p style="font-size:12px;color:#a1a1aa;margin-bottom:8px;"><strong>Enviar áudio:</strong></p>
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
+                <label for="file-input-${song.id}" style="flex:1;background:#000;border:1px dashed rgba(255,255,255,0.2);color:#a1a1aa;padding:8px 10px;font-size:12px;border-radius:4px;cursor:pointer;text-align:center;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                    <i class="material-icons" style="font-size:14px;vertical-align:middle;margin-right:4px;">upload_file</i>
+                    <span id="file-label-${song.id}">Escolher arquivo MP3</span>
+                </label>
+                <input type="file" accept="audio/mpeg,audio/mp3,.mp3" id="file-input-${song.id}" style="display:none;" onchange="onAudioFileSelected(${song.id})">
+                <button onclick="uploadAudioFile(${song.id})" id="btn-upload-${song.id}" disabled style="background:#6366f1;border:none;color:#fff;font-weight:bold;padding:6px 14px;font-size:13px;border-radius:4px;cursor:pointer;opacity:0.5;">Enviar</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+                <div style="flex:1;height:1px;background:rgba(255,255,255,0.07);"></div>
+                <span style="font-size:11px;color:#52525b;">ou cole a URL</span>
+                <div style="flex:1;height:1px;background:rgba(255,255,255,0.07);"></div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;">
+                <input type="text" placeholder="URL do MP3 gerado no Suno" id="audio-input-${song.id}" style="flex:1;background:#000;border:1px solid rgba(255,255,255,0.1);color:#fff;padding:6px 10px;font-size:13px;border-radius:4px;">
+                <button onclick="submitAudioUrl(${song.id})" style="background:#10b981;border:none;color:#000;font-weight:bold;padding:6px 15px;font-size:13px;border-radius:4px;cursor:pointer;">Gerar Prévia</button>
+            </div>
+        </div>
+        ` : ""}
+    `;
+    return card;
+}
+
+// ---- Admin: upload MP3 do computador ----
+function onAudioFileSelected(songId) {
+    const input = document.getElementById(`file-input-${songId}`);
+    const label = document.getElementById(`file-label-${songId}`);
+    const btn = document.getElementById(`btn-upload-${songId}`);
+    if (input.files && input.files[0]) {
+        label.textContent = input.files[0].name;
+        btn.disabled = false;
+        btn.style.opacity = '1';
+    }
+}
+
+async function uploadAudioFile(songId) {
+    const input = document.getElementById(`file-input-${songId}`);
+    const btn = document.getElementById(`btn-upload-${songId}`);
+    if (!input.files || !input.files[0]) { alert('Selecione um arquivo MP3.'); return; }
+    const file = input.files[0];
+
+    btn.disabled = true;
+    btn.textContent = 'Enviando…';
+    btn.style.opacity = '0.6';
+
+    try {
+        const resp = await fetch('/api/admin/upload-audio', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'audio/mpeg',
+                'X-Song-Id': String(songId),
+                ...getAdminHeaders()
+            },
+            body: file
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+            const msg = data.previewGenerated
+                ? `✅ Upload concluído! Prévia gerada.\n\nLink de aprovação:\n${data.approvalUrl}`
+                : `⚠️ Upload feito, prévia sem FFmpeg.\n\nLink:\n${data.approvalUrl}`;
+            alert(msg);
+            await syncSongsWithServer();
+            renderAdminPendingList();
+        } else {
+            alert('Erro: ' + (data.error || 'Tente novamente.'));
+            btn.disabled = false;
+            btn.textContent = 'Enviar';
+            btn.style.opacity = '1';
+        }
+    } catch (e) {
+        alert('Erro de rede: ' + e.message);
+        btn.disabled = false;
+        btn.textContent = 'Enviar';
+        btn.style.opacity = '1';
+    }
+}
+
+// =====================================================================
+// PAYMENT SCREEN — /pagamento/:token
+// =====================================================================
+
+let paymentToken = null;
+let pixCopyPasteCode = '';
+
+function showPaymentScreen(token) {
+    paymentToken = token;
+    const screen = document.getElementById('payment-screen');
+    if (!screen) return;
+    screen.style.display = 'flex';
+    screen.style.flexDirection = 'column';
+    document.getElementById('payment-loading').style.display = 'flex';
+    document.getElementById('payment-content').style.display = 'none';
+    document.getElementById('payment-error').style.display = 'none';
+    fetchAndRenderPayment(token);
+}
+
+async function fetchAndRenderPayment(token) {
+    try {
+        const resp = await fetch('/api/payment/create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token })
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || 'Erro ao gerar cobrança PIX');
+        renderPaymentContent(data);
+    } catch (e) {
+        document.getElementById('payment-loading').style.display = 'none';
+        document.getElementById('payment-error-msg').textContent = e.message;
+        document.getElementById('payment-error').style.display = 'block';
+    }
+}
+
+function renderPaymentContent(data) {
+    document.getElementById('payment-loading').style.display = 'none';
+
+    const value = typeof data.value === 'number'
+        ? data.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+        : `R$ ${data.value}`;
+    document.getElementById('payment-value').textContent = value;
+
+    if (data.dueDate) {
+        const [y, m, d] = data.dueDate.split('-');
+        document.getElementById('payment-due').textContent = `Válido até ${d}/${m}/${y}`;
+    }
+
+    if (data.pix?.qrCodeImage) {
+        document.getElementById('payment-qr-img').src = `data:image/png;base64,${data.pix.qrCodeImage}`;
+    }
+
+    pixCopyPasteCode = data.pix?.copyPaste || '';
+    const codeEl = document.getElementById('payment-pix-code');
+    codeEl.textContent = pixCopyPasteCode.length > 40
+        ? pixCopyPasteCode.substring(0, 40) + '…'
+        : pixCopyPasteCode;
+
+    document.getElementById('payment-content').style.display = 'block';
+}
+
+function copyPaymentPixCode() {
+    if (!pixCopyPasteCode) return;
+    navigator.clipboard.writeText(pixCopyPasteCode)
+        .then(() => alert('Código PIX copiado! Cole no seu banco para pagar.'))
+        .catch(() => {
+            const el = document.createElement('textarea');
+            el.value = pixCopyPasteCode;
+            document.body.appendChild(el);
+            el.select();
+            document.execCommand('copy');
+            document.body.removeChild(el);
+            alert('Código PIX copiado!');
+        });
+}
+
+// Route detection on load
+document.addEventListener('DOMContentLoaded', () => {
+    detectRoute();
+});
