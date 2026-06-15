@@ -17,6 +17,11 @@ local.properties
 .env
 debug.keystore
 node_modules/
+storage/
+backups/
+logs/
+.claude/
+db.json
 .build-outputs/
 dist/
 build/

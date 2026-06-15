@@ -161,6 +161,7 @@ function switchTab(tabId) {
     } else if (tabId === "client") {
         renderClientArea();
     } else if (tabId === "admin") {
+        switchAdminTab('pedidos');
         renderAdminPendingList();
     }
 }
@@ -169,28 +170,16 @@ function switchTab(tabId) {
 window.addEventListener("DOMContentLoaded", async () => {
     songs = AppDB.getSongs();
 
-    // Render initial page elements
     renderLibraryScreen();
     setupWizardListeners();
     setupClientLookupListener();
 
-    // Sync with backend server
     await syncSongsWithServer();
 });
 
 async function syncSongsWithServer() {
-    try {
-        const response = await fetch("/api/songs");
-        if (response.ok) {
-            const serverSongs = await response.json();
-            if (Array.isArray(serverSongs) && serverSongs.length > 0) {
-                songs = serverSongs;
-                renderLibraryScreen();
-            }
-        }
-    } catch (e) {
-        console.warn("Could not sync songs with server, using local database:", e);
-    }
+    // A biblioteca exibe apenas as músicas de exemplo locais.
+    // Clientes encontram seus pedidos via aba "Cliente" (busca por WhatsApp/e-mail).
 }
 
 
@@ -219,6 +208,16 @@ function setupWizardListeners() {
         chip.addEventListener('click', () => {
             chip.classList.toggle('selected');
         });
+    });
+}
+
+function applyCpfMask(input) {
+    input.addEventListener('input', function() {
+        let v = this.value.replace(/\D/g, '').substring(0, 11);
+        if (v.length > 9) v = v.replace(/^(\d{3})(\d{3})(\d{3})(\d{1,2})/, '$1.$2.$3-$4');
+        else if (v.length > 6) v = v.replace(/^(\d{3})(\d{3})(\d{1,3})/, '$1.$2.$3');
+        else if (v.length > 3) v = v.replace(/^(\d{3})(\d{1,3})/, '$1.$2');
+        this.value = v;
     });
 }
 
@@ -828,6 +827,101 @@ async function renderAdminPendingList() {
     }
 }
 
+// --- ADMIN SUB-NAV ---
+
+let adminTab = 'pedidos';
+let customersData = [];
+
+function switchAdminTab(tab) {
+    adminTab = tab;
+    const btnPedidos   = document.getElementById('admin-tab-pedidos');
+    const btnClientes  = document.getElementById('admin-tab-clientes');
+    const secPedidos   = document.getElementById('admin-section-pedidos');
+    const secClientes  = document.getElementById('admin-section-clientes');
+
+    const activeStyle   = 'flex:1; padding:9px; font-size:13px; font-weight:600; border-radius:8px; border:none; cursor:pointer; background:#e11d48; color:#fff;';
+    const inactiveStyle = 'flex:1; padding:9px; font-size:13px; font-weight:600; border-radius:8px; border:none; cursor:pointer; background:rgba(255,255,255,0.07); color:#a1a1aa;';
+
+    if (tab === 'pedidos') {
+        btnPedidos.style.cssText  = activeStyle;
+        btnClientes.style.cssText = inactiveStyle;
+        secPedidos.style.display  = 'block';
+        secClientes.style.display = 'none';
+    } else {
+        btnPedidos.style.cssText  = inactiveStyle;
+        btnClientes.style.cssText = activeStyle;
+        secPedidos.style.display  = 'none';
+        secClientes.style.display = 'block';
+        renderAdminCustomers();
+    }
+}
+
+async function renderAdminCustomers() {
+    const container = document.getElementById('admin-customers-list');
+    if (!container) return;
+    container.innerHTML = `<div style="text-align:center; color:#a1a1aa; padding:20px; font-size:13px;">Carregando clientes...</div>`;
+
+    try {
+        const resp = await fetch('/api/admin/customers', { headers: getAdminHeaders() });
+        if (!resp.ok) throw new Error('Erro ao carregar clientes');
+        customersData = await resp.json();
+
+        if (customersData.length === 0) {
+            container.innerHTML = `<div style="text-align:center; color:#a1a1aa; padding:30px; font-size:13px;">Nenhum cliente cadastrado ainda.</div>`;
+            return;
+        }
+
+        container.innerHTML = `
+            <div style="font-size:11px; color:#6b7280; margin-bottom:10px;">${customersData.length} clientes encontrados</div>
+            ${customersData.map(c => `
+                <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:10px; padding:14px 16px; margin-bottom:10px;">
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
+                        <div>
+                            <p style="margin:0; font-size:14px; font-weight:600; color:#fff;">${escapeHtml(c.name || '—')}</p>
+                            <p style="margin:2px 0 0; font-size:12px; color:#a1a1aa;">${escapeHtml(c.whatsapp || '—')}</p>
+                        </div>
+                        <div style="text-align:right;">
+                            <span style="font-size:11px; padding:2px 8px; border-radius:20px; background:rgba(225,29,72,0.12); color:#f43f5e; font-weight:600;">${c.total_orders} pedido${c.total_orders != 1 ? 's' : ''}</span>
+                            ${parseInt(c.paid_orders) > 0 ? `<br><span style="font-size:11px; padding:2px 8px; border-radius:20px; background:rgba(16,185,129,0.12); color:#10b981; font-weight:600; margin-top:4px; display:inline-block;">${c.paid_orders} pago${c.paid_orders != 1 ? 's' : ''}</span>` : ''}
+                        </div>
+                    </div>
+                    <div style="display:flex; flex-wrap:wrap; gap:8px; font-size:11px; color:#6b7280;">
+                        ${c.email ? `<span><i class="material-icons" style="font-size:12px; vertical-align:middle;">email</i> ${escapeHtml(c.email)}</span>` : ''}
+                        ${c.cpf ? `<span><i class="material-icons" style="font-size:12px; vertical-align:middle;">badge</i> ${escapeHtml(c.cpf)}</span>` : ''}
+                        <span><i class="material-icons" style="font-size:12px; vertical-align:middle;">calendar_today</i> ${c.last_order_at ? new Date(c.last_order_at).toLocaleDateString('pt-BR') : '—'}</span>
+                    </div>
+                </div>
+            `).join('')}
+        `;
+    } catch (e) {
+        container.innerHTML = `<div style="color:#ef4444; text-align:center; padding:20px; font-size:13px;">Erro ao carregar clientes.</div>`;
+    }
+}
+
+function exportCustomersCsv() {
+    if (!customersData.length) { alert('Nenhum dado para exportar.'); return; }
+    const header = ['Nome', 'WhatsApp', 'E-mail', 'CPF', 'Total Pedidos', 'Pedidos Pagos', 'Último Pedido'];
+    const rows = customersData.map(c => [
+        c.name || '',
+        c.whatsapp || '',
+        c.email || '',
+        c.cpf || '',
+        c.total_orders || 0,
+        c.paid_orders || 0,
+        c.last_order_at ? new Date(c.last_order_at).toLocaleDateString('pt-BR') : ''
+    ]);
+    const csv = [header, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `magic-music-clientes-${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
 function copyTextById(id) {
     const el = document.getElementById(id);
     if (el) {
@@ -1078,40 +1172,21 @@ function showPaymentScreen(token) {
     if (!screen) return;
     screen.style.display = 'flex';
     screen.style.flexDirection = 'column';
-    const cpfForm = document.getElementById('payment-cpf-form');
-    if (cpfForm) cpfForm.style.display = 'block';
     const loadingEl = document.getElementById('payment-loading');
-    if (loadingEl) loadingEl.style.display = 'none';
+    if (loadingEl) { loadingEl.style.display = 'flex'; }
     const contentEl = document.getElementById('payment-content');
     if (contentEl) contentEl.style.display = 'none';
     const errEl = document.getElementById('payment-error');
     if (errEl) errEl.style.display = 'none';
-    const cpfInput = document.getElementById('payment-cpf');
-    if (cpfInput) { cpfInput.value = ''; setTimeout(function() { cpfInput.focus(); }, 100); }
+    fetchAndRenderPayment(token);
 }
 
-function submitPaymentCpf() {
-    const cpfInput = document.getElementById('payment-cpf');
-    if (!cpfInput) return;
-    const cpf = cpfInput.value.replace(/\D/g, '');
-    if (!cpf || cpf.length !== 11) {
-        alert('Informe o CPF completo (11 dígitos).');
-        cpfInput.focus();
-        return;
-    }
-    const cpfForm = document.getElementById('payment-cpf-form');
-    if (cpfForm) cpfForm.style.display = 'none';
-    const loadingEl = document.getElementById('payment-loading');
-    if (loadingEl) loadingEl.style.display = 'flex';
-    fetchAndRenderPayment(paymentToken, cpf);
-}
-
-async function fetchAndRenderPayment(token, cpf) {
+async function fetchAndRenderPayment(token) {
     try {
         const resp = await fetch('/api/payment/create', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token: token, cpf: cpf })
+            body: JSON.stringify({ token: token })
         });
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.error || 'Erro ao gerar cobrança PIX');
@@ -1171,4 +1246,15 @@ function _fallbackCopyPix() {
     alert('Código PIX copiado!');
 }
 
-document.addEventListener('DOMContentLoaded', function() { detectRoute(); });
+document.addEventListener('DOMContentLoaded', function() {
+    const splash = document.getElementById('splash-screen');
+    const mainApp = document.getElementById('main-app');
+
+    setTimeout(function() {
+        splash.classList.add('fade-out');
+        if (mainApp) mainApp.style.opacity = '1';
+        setTimeout(function() { splash.style.display = 'none'; }, 500);
+    }, 5000);
+
+    detectRoute();
+});

@@ -679,6 +679,31 @@ const server = http.createServer(async (req, res) => {
         }
     }
 
+    // 8b. Admin: CRM — lista de clientes únicos com totais
+    if (req.method === 'GET' && pathname === '/api/admin/customers') {
+        if (!isAdminAuthorized(req)) return sendJson(res, 401, { error: 'Unauthorized.' });
+        try {
+            const result = await pool.query(`
+                SELECT
+                    REGEXP_REPLACE(LOWER(customer_whatsapp), '[\\s().\\-]', '', 'g') AS whatsapp_key,
+                    MAX(customer_name)      AS name,
+                    MAX(customer_whatsapp)  AS whatsapp,
+                    MAX(customer_email)     AS email,
+                    MAX(customer_cpf)       AS cpf,
+                    COUNT(*)                AS total_orders,
+                    COUNT(*) FILTER (WHERE status IN ('paid','delivered')) AS paid_orders,
+                    MAX(created_at)         AS last_order_at
+                FROM songs
+                WHERE customer_whatsapp != '' OR customer_email != ''
+                GROUP BY whatsapp_key
+                ORDER BY last_order_at DESC
+            `);
+            return sendJson(res, 200, result.rows);
+        } catch (e) {
+            return sendJson(res, 500, { error: e.message });
+        }
+    }
+
     // 9. Admin: All orders with optional status filter
     if (req.method === 'GET' && pathname === '/api/admin/orders') {
         if (!isAdminAuthorized(req)) return sendJson(res, 401, { error: "Unauthorized." });
@@ -887,18 +912,13 @@ const server = http.createServer(async (req, res) => {
     // 16. Create PIX payment via Asaas
     if (req.method === 'POST' && pathname === '/api/payment/create') {
         try {
-            const { token, cpf } = await getJsonBody(req);
+            const { token } = await getJsonBody(req);
             if (!token) return sendJson(res, 400, { error: "Token obrigatório." });
-
-            const cpfDigits = (cpf || '').replace(/\D/g, '');
-            if (!cpfDigits || cpfDigits.length !== 11) {
-                return sendJson(res, 400, { error: "CPF inválido. Informe os 11 dígitos." });
-            }
 
             const songRes = await pool.query('SELECT * FROM songs WHERE approval_token=$1', [token]);
             if (songRes.rows.length === 0) return sendJson(res, 404, { error: "Pedido não encontrado." });
 
-            let song = rowToSong(songRes.rows[0]);
+            const song = rowToSong(songRes.rows[0]);
             if (song.status !== 'awaiting_payment') {
                 return sendJson(res, 400, { error: `Status atual não permite pagamento: ${song.status}` });
             }
@@ -907,13 +927,13 @@ const server = http.createServer(async (req, res) => {
                 return sendJson(res, 500, { error: "Gateway de pagamento não configurado." });
             }
 
-            // Salvar CPF
-            await pool.query('UPDATE songs SET customer_cpf=$1 WHERE id=$2', [cpfDigits, song.id]);
-            song.customerCpf = cpfDigits;
+            const defaultCustomerId = process.env.ASAAS_DEFAULT_CUSTOMER_ID;
+            if (!defaultCustomerId) {
+                return sendJson(res, 500, { error: "ASAAS_DEFAULT_CUSTOMER_ID não configurado no servidor." });
+            }
 
             const price = parseFloat(process.env.MAGIC_MUSIC_PRICE || '49.90');
-
-            const customerId = await getOrCreateAsaasCustomer(song);
+            const customerId = defaultCustomerId;
 
             const dueDate = new Date();
             dueDate.setDate(dueDate.getDate() + 1);

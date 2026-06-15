@@ -1,3 +1,48 @@
+/* SPLASH SCREEN */
+#splash-screen {
+    position: fixed;
+    inset: 0;
+    background: #090d16;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 99999;
+    transition: opacity 0.5s ease;
+}
+#splash-screen.fade-out {
+    opacity: 0;
+    pointer-events: none;
+}
+#splash-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+}
+#splash-logo {
+    font-size: 42px;
+    font-weight: 800;
+    letter-spacing: -1px;
+    color: #fff;
+}
+#splash-subtitle {
+    font-size: 14px;
+    color: #6b7280;
+    letter-spacing: 0.5px;
+}
+#splash-footer {
+    position: absolute;
+    bottom: 32px;
+    font-size: 13px;
+    color: #374151;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+#main-app {
+    transition: opacity 0.4s ease;
+}
+
 /* Design Tokens & Theme Colors */
 :root {
     --space-black: #090d16;
