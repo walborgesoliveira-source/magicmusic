@@ -1209,10 +1209,12 @@ function renderPaymentContent(data) {
         : 'R$ ' + data.value;
     const valEl = document.getElementById('payment-value');
     if (valEl) valEl.textContent = value;
-    if (data.dueDate) {
-        const parts = data.dueDate.split('-');
+    if (data.pix && data.pix.expirationDate) {
         const dueEl = document.getElementById('payment-due');
-        if (dueEl) dueEl.textContent = 'Válido até ' + parts[2] + '/' + parts[1] + '/' + parts[0];
+        if (dueEl) {
+            const d = new Date(data.pix.expirationDate);
+            dueEl.textContent = 'Válido até ' + d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+        }
     }
     if (data.pix && data.pix.qrCodeImage) {
         const qrImg = document.getElementById('payment-qr-img');

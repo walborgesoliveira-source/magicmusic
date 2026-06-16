@@ -330,40 +330,33 @@ function getRawBody(req) {
     });
 }
 
-// --- ASAAS PAYMENT HELPERS ---
+// --- ASAAS PAYMENT HELPERS (DESATIVADO — mantido como backup histórico) ---
+/*
+async function asaasRequest(method, endpoint, body) { ... }
+async function getOrCreateAsaasCustomer(song) { ... }
+*/
 
-async function asaasRequest(method, endpoint, body) {
-    const apiKey = process.env.ASAAS_API_KEY;
-    const baseUrl = process.env.ASAAS_BASE_URL || 'https://www.asaas.com/api/v3';
-    const resp = await fetch(`${baseUrl}${endpoint}`, {
+// --- STRIPE PAYMENT HELPER (DESATIVADO) ---
+// function getStripe() { ... }
+
+// --- MERCADO PAGO PAYMENT HELPER ---
+
+async function mercadoPagoRequest(method, endpoint, body, idempotencyKey) {
+    const token = process.env.MERCADOPAGO_ACCESS_TOKEN;
+    if (!token) throw new Error('MERCADOPAGO_ACCESS_TOKEN não configurado.');
+    const headers = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+    };
+    if (idempotencyKey) headers['X-Idempotency-Key'] = idempotencyKey;
+    const resp = await fetch(`https://api.mercadopago.com${endpoint}`, {
         method,
-        headers: { 'Content-Type': 'application/json', 'access_token': apiKey },
+        headers,
         body: body ? JSON.stringify(body) : undefined
     });
     const json = await resp.json();
-    if (!resp.ok) throw new Error(`Asaas ${resp.status}: ${JSON.stringify(json.errors || json)}`);
+    if (!resp.ok) throw new Error(`MercadoPago ${resp.status}: ${JSON.stringify(json.message || json)}`);
     return json;
-}
-
-async function getOrCreateAsaasCustomer(song) {
-    const name = song.customerName || 'Cliente Magic Music';
-    const email = song.customerEmail || null;
-    const phone = song.customerWhatsapp ? song.customerWhatsapp.replace(/\D/g, '') : null;
-    const cpfCnpj = song.customerCpf || null;
-
-    if (!cpfCnpj) throw new Error('CPF do cliente não informado. Preencha o CPF no pedido.');
-
-    // Busca cliente pelo CPF (garantia de que tem CPF cadastrado)
-    const search = await asaasRequest('GET', `/customers?cpfCnpj=${cpfCnpj}&limit=1`);
-    if (search.data && search.data.length > 0) return search.data[0].id;
-
-    // Cria novo cliente com CPF
-    const payload = { name, cpfCnpj };
-    if (email) payload.email = email;
-    if (phone) payload.mobilePhone = phone;
-
-    const customer = await asaasRequest('POST', '/customers', payload);
-    return customer.id;
 }
 
 const MIME_TYPES = {
@@ -909,7 +902,7 @@ const server = http.createServer(async (req, res) => {
         }
     }
 
-    // 16. Create PIX payment via Asaas
+    // 16. Create PIX payment via Mercado Pago
     if (req.method === 'POST' && pathname === '/api/payment/create') {
         try {
             const { token } = await getJsonBody(req);
@@ -923,46 +916,42 @@ const server = http.createServer(async (req, res) => {
                 return sendJson(res, 400, { error: `Status atual não permite pagamento: ${song.status}` });
             }
 
-            if (!process.env.ASAAS_API_KEY) {
-                return sendJson(res, 500, { error: "Gateway de pagamento não configurado." });
-            }
-
-            const defaultCustomerId = process.env.ASAAS_DEFAULT_CUSTOMER_ID;
-            if (!defaultCustomerId) {
-                return sendJson(res, 500, { error: "ASAAS_DEFAULT_CUSTOMER_ID não configurado no servidor." });
-            }
-
             const price = parseFloat(process.env.MAGIC_MUSIC_PRICE || '49.90');
-            const customerId = defaultCustomerId;
+            const cpf = (song.customerCpf || '').replace(/\D/g, '');
+            const nameParts = (song.customerName || 'Cliente Magic').trim().split(' ');
+            const firstName = nameParts[0] || 'Cliente';
+            const lastName = nameParts.slice(1).join(' ') || 'Music';
+            const email = song.customerEmail || `cliente${song.id}@magicmusic.com.br`;
 
-            const dueDate = new Date();
-            dueDate.setDate(dueDate.getDate() + 1);
-            const dueDateStr = dueDate.toISOString().split('T')[0];
-
-            const payment = await asaasRequest('POST', '/payments', {
-                customer: customerId,
-                billingType: 'PIX',
-                value: price,
-                dueDate: dueDateStr,
+            const payment = await mercadoPagoRequest('POST', '/v1/payments', {
+                transaction_amount: price,
                 description: `Magic Music - ${song.title || 'Pedido ' + song.id}`,
-                externalReference: String(song.id)
-            });
+                payment_method_id: 'pix',
+                payer: {
+                    email,
+                    first_name: firstName,
+                    last_name: lastName,
+                    identification: { type: 'CPF', number: cpf }
+                }
+            }, `magic-music-${song.id}`);
 
-            const qrCode = await asaasRequest('GET', `/payments/${payment.id}/pixQrCode`);
+            const pixData = payment.point_of_interaction && payment.point_of_interaction.transaction_data;
+            if (!pixData) throw new Error('Mercado Pago não retornou dados do PIX.');
 
-            await pool.query(`UPDATE songs SET pix_transaction_id=$1, payment_provider='asaas' WHERE id=$2`,
-                [payment.id, song.id]);
-            logEvent('payment_created', { songId: song.id, paymentId: payment.id });
+            await pool.query(
+                `UPDATE songs SET pix_transaction_id=$1, payment_provider='mercadopago' WHERE id=$2`,
+                [String(payment.id), song.id]
+            );
+            logEvent('payment_created', { songId: song.id, paymentId: payment.id, provider: 'mercadopago' });
 
             return sendJson(res, 200, {
                 success: true,
                 paymentId: payment.id,
                 value: price,
-                dueDate: dueDateStr,
                 pix: {
-                    qrCodeImage: qrCode.encodedImage,
-                    copyPaste: qrCode.payload,
-                    expirationDate: qrCode.expirationDate
+                    qrCodeImage: pixData.qr_code_base64,
+                    copyPaste: pixData.qr_code,
+                    expirationDate: payment.date_of_expiration
                 }
             });
         } catch (e) {
@@ -971,35 +960,30 @@ const server = http.createServer(async (req, res) => {
         }
     }
 
-    // 17. Asaas PIX webhook (PAYMENT_RECEIVED / PAYMENT_CONFIRMED)
+    // 17. Mercado Pago webhook (payment.updated → status approved)
     if (req.method === 'POST' && pathname === '/api/payment/webhook') {
         try {
-            const webhookToken = process.env.ASAAS_WEBHOOK_TOKEN;
-            if (webhookToken) {
-                const received = req.headers['asaas-access-token'];
-                if (received !== webhookToken) {
-                    logEvent('webhook_unauthorized', { ip: req.socket.remoteAddress });
-                    return sendJson(res, 401, { error: 'Unauthorized' });
-                }
-            }
-
             const body = await getJsonBody(req);
-            const { event, payment } = body;
+            logEvent('webhook_received', { action: body.action, dataId: body.data && body.data.id });
 
-            logEvent('webhook_received', { event, paymentId: payment?.id });
-
-            if (!['PAYMENT_RECEIVED', 'PAYMENT_CONFIRMED'].includes(event)) {
-                return sendJson(res, 200, { ok: true, skipped: event });
+            // MP envia action "payment.updated" ou "payment.created"
+            if (!body.data || !body.data.id) {
+                return sendJson(res, 200, { ok: true, skipped: 'no data.id' });
             }
 
-            if (!payment?.id) {
-                return sendJson(res, 400, { error: 'payment.id ausente no payload' });
+            const mpPaymentId = String(body.data.id);
+
+            // Busca o pagamento na API do MP para confirmar o status real
+            const payment = await mercadoPagoRequest('GET', `/v1/payments/${mpPaymentId}`);
+            logEvent('webhook_payment_status', { mpPaymentId, status: payment.status });
+
+            if (payment.status !== 'approved') {
+                return sendJson(res, 200, { ok: true, skipped: `status: ${payment.status}` });
             }
 
-            // Verifica se já foi processado
-            const checkRes = await pool.query('SELECT * FROM songs WHERE pix_transaction_id=$1', [payment.id]);
+            const checkRes = await pool.query('SELECT * FROM songs WHERE pix_transaction_id=$1', [mpPaymentId]);
             if (checkRes.rows.length === 0) {
-                logEvent('webhook_song_not_found', { paymentId: payment.id });
+                logEvent('webhook_song_not_found', { mpPaymentId });
                 return sendJson(res, 200, { ok: true, notFound: true });
             }
             const existing = rowToSong(checkRes.rows[0]);
@@ -1011,13 +995,13 @@ const server = http.createServer(async (req, res) => {
                 UPDATE songs SET status='delivered', paid_at=NOW(), delivered_at=NOW(),
                     payment_status='paid'
                 WHERE pix_transaction_id=$1`,
-                [payment.id]
+                [mpPaymentId]
             );
 
-            const songRes = await pool.query('SELECT * FROM songs WHERE pix_transaction_id=$1', [payment.id]);
+            const songRes = await pool.query('SELECT * FROM songs WHERE pix_transaction_id=$1', [mpPaymentId]);
             const song = rowToSong(songRes.rows[0]);
 
-            logEvent('payment_confirmed', { songId: song.id, paymentId: payment.id });
+            logEvent('payment_confirmed', { songId: song.id, mpPaymentId, provider: 'mercadopago' });
 
             try {
                 await sendTelegramMessage([
